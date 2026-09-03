@@ -14,5 +14,10 @@ reference only.
 
 ## Status
 
-Phase 0 scaffolding — see TASKS.md for what's done and what's next. Full
-setup/dev/deploy/troubleshooting instructions land in Phase 8.
+Phases 0-6 complete (infra/Tizen toolchain, TV shell, API+Immich, TV<->API
+pairing/playlist, server-side composition engine, colour/mat engine +
+faux-3D framing, and the Memories Web dashboard with real login/auth) —
+see TASKS.md for the full phase-by-phase build log. Full setup/dev/
+deploy/troubleshooting instructions still land in Phase 8; in the
+meantime, `docker compose up`, then `npm run create-user` in `api/` to
+provision a dashboard login (see that script's usage message).

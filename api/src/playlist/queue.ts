@@ -115,6 +115,21 @@ export async function regenerateQueue(tvId: string, config: Configuration): Prom
   ]);
 }
 
+// The wire shape both /playlist and the Phase 6 dashboard's "current" /
+// "next" fields use — factored out so there's exactly one place that
+// turns a stored QueueItem back into a Presentation.
+export function queueItemToPresentation(item: QueueItem) {
+  return {
+    presentationId: item.presentationId,
+    duration: item.durationSeconds,
+    layout: item.layout,
+    background: item.background,
+    frame: item.frame,
+    transition: item.transition,
+    assets: item.assets,
+  };
+}
+
 export interface PlaylistResult {
   configurationVersion: number;
   items: QueueItem[];
@@ -147,4 +162,33 @@ export async function getNextPlaylistItems(deviceId: string, count: number): Pro
   await prisma.tv.update({ where: { id: tv.id }, data: { lastServedPosition: position } });
 
   return { configurationVersion: latestConfig?.version ?? 0, items };
+}
+
+// For Memories Web's "coming next" strip (§4.2, Phase 6) — the `count`
+// items after whatever the TV last reported *actually displaying*
+// (`currentPresentationId`), looping the same way /playlist does. This is
+// deliberately independent of `lastServedPosition` (the hand-out cursor
+// for batched /playlist requests, which runs ahead of what's on screen)
+// — read-only, never advances anything.
+export async function getUpcomingPreview(
+  tvId: string,
+  currentPresentationId: string | null,
+  count: number,
+): Promise<QueueItem[]> {
+  const allItems = await prisma.queueItem.findMany({ where: { tvId }, orderBy: { position: 'asc' } });
+  if (allItems.length === 0) return [];
+
+  const currentIndex = currentPresentationId
+    ? allItems.findIndex((item) => item.presentationId === currentPresentationId)
+    : -1;
+  const startPosition = currentIndex === -1 ? 0 : (currentIndex + 1) % allItems.length;
+
+  const n = Math.min(count, allItems.length);
+  const items: QueueItem[] = [];
+  let position = startPosition;
+  for (let i = 0; i < n; i++) {
+    items.push(allItems[position]);
+    position = (position + 1) % allItems.length;
+  }
+  return items;
 }

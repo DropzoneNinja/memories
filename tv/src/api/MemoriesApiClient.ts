@@ -25,8 +25,15 @@ export class MemoriesApiClient {
     return res.json();
   }
 
-  async sendHeartbeat(deviceId: string): Promise<void> {
-    await fetch(this.url(`/api/v1/tvs/${deviceId}/heartbeat`), { method: 'POST' }).catch(() => {
+  // `status` lets Memories Web show "currently displaying" + EXIF (§4.2,
+  // Phase 6) — distinct from the playlist hand-out cursor, which runs
+  // ahead of what's actually on screen.
+  async sendHeartbeat(deviceId: string, status?: { presentationId: string; paused: boolean }): Promise<void> {
+    await fetch(this.url(`/api/v1/tvs/${deviceId}/heartbeat`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(status ?? {}),
+    }).catch(() => {
       // Best-effort — a missed heartbeat isn't fatal (PROJECT.md §5.10
       // disconnected-behaviour policies land in Phase 7).
     });

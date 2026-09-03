@@ -6,10 +6,22 @@ const FETCH_BATCH_SIZE = 5;
 // Fetch more once we're this close to the end of the locally-held queue.
 const REFILL_THRESHOLD = 2;
 // If the queue comes back empty (e.g. a config PUT's queue regeneration
-// is still in flight — genuinely observed racing against a TV poll in
-// Phase 3 testing), retry rather than silently stalling forever.
-const EMPTY_QUEUE_RETRY_MS = 3000;
-const EMPTY_QUEUE_MAX_ATTEMPTS = 10;
+// still in flight — genuinely observed racing against a TV poll in Phase
+// 3 testing), retry fast for a while first, on the assumption that's
+// what's happening.
+const EMPTY_QUEUE_FAST_RETRY_MS = 3000;
+const EMPTY_QUEUE_FAST_RETRY_ATTEMPTS = 10;
+// After that, an empty queue more likely means "paired but not
+// configured yet" (a completely normal state — pairing and configuring
+// are two separate dashboard steps, §5.9 then §4.2) rather than a
+// transient race. Keep retrying, just gently, forever — there's no
+// version of "give up permanently" that's ever correct for an always-on
+// display: it would mean a TV paired before its album was configured
+// never recovers even after someone *does* configure it, with no way to
+// notice short of restarting the app. Caught on real hardware in Phase 6
+// testing (paired via the dashboard, configured moments later, TV never
+// picked it up).
+const EMPTY_QUEUE_SLOW_RETRY_MS = 20_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -42,12 +54,19 @@ export class PlaybackController {
     return this.paused;
   }
 
+  // What to report on the next heartbeat (§4.2, Phase 6) — null until the
+  // first item has actually been shown.
+  get currentStatus(): { presentationId: string; paused: boolean } | null {
+    const presentation = this.queue[this.index];
+    return presentation ? { presentationId: presentation.presentationId, paused: this.paused } : null;
+  }
+
   async start(): Promise<void> {
-    for (let attempt = 1; attempt <= EMPTY_QUEUE_MAX_ATTEMPTS; attempt++) {
+    for (let attempt = 1; this.queue.length === 0; attempt++) {
       await this.fetchMore();
       if (this.queue.length > 0) break;
-      this.onStatusChange?.(`waiting for playlist… (${attempt}/${EMPTY_QUEUE_MAX_ATTEMPTS})`);
-      await sleep(EMPTY_QUEUE_RETRY_MS);
+      this.onStatusChange?.(`waiting for playlist… (attempt ${attempt})`);
+      await sleep(attempt <= EMPTY_QUEUE_FAST_RETRY_ATTEMPTS ? EMPTY_QUEUE_FAST_RETRY_MS : EMPTY_QUEUE_SLOW_RETRY_MS);
     }
     this.index = 0;
     this.showCurrent();

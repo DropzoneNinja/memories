@@ -511,27 +511,115 @@ correct in practice — this needed an actual photo of the actual screen to
 catch, the same way Phases 4-5's colour thresholds needed real EXIF/real
 photos to catch.
 
-## Phase 6 — Memories Web Dashboard
+## Phase 6 — Memories Web Dashboard ✅ complete
 
 *(Milestone 6, §4.2)*
 
-- [ ] Scaffold the React + TypeScript app (`web/`), wired into
-      `docker-compose.yml`
-- [ ] Implement login/auth against the Memories API
-- [ ] Implement the TV list pane: all paired TVs, online/offline status,
-      current album at a glance
-- [ ] Implement the per-TV detail pane: current image + full EXIF, and a
-      next-queue thumbnail strip (clickable for metadata)
-- [ ] Implement the per-TV config form: album, interval, playback mode,
-      mat mode
-- [ ] Implement "Save / Push to TV" — bumps config version, regenerates
-      the queue, and notifies the TV
-- [ ] Implement transport controls (next/previous/pause/resume) wired to
-      the command queue
-- [ ] Implement the pairing UI: enter a code, name the TV, assign
-      permitted users
-- [ ] Implement the album picker sourced from `GET /api/v1/albums`
-- [ ] Layout/usability pass matching the sketch in §4.2
+Two real backend gaps had to be closed before "the dashboard" could mean
+anything: the API had **zero authentication** (every admin endpoint —
+including reconfiguring a TV — was wide open to anyone on the LAN), and
+nothing tracked what a TV was *actually* displaying (only that it had
+been handed batches of queue items, which runs ahead of what's on
+screen). Both are now real: `api/src/auth/` (scrypt password hashing, a
+JWT session token signed with `SESSION_SECRET`, a `requireAuth`
+preHandler) gates every admin-facing route in `tvs.ts` and the
+list/assets routes in `albums.ts` — but deliberately *not* the
+device-facing TV routes or the thumbnail proxy, which the TV itself
+calls with no login concept at all (§6, §13). The TV now reports its
+`currentPresentationId`/`paused` state on every heartbeat
+(`Tv.currentPresentationId`/`paused`, migration
+`20260903154749_tv_status_reporting`), which `GET /tvs/:id` resolves
+into real `current`/`next` Presentation data for the dashboard.
+
+`web/` is a real React+Vite SPA: `api/client.ts` (typed fetch wrapper,
+bearer-token auth), `auth/AuthContext.tsx`, and components for the login
+screen, TV list pane, per-TV detail pane (current image + EXIF, next
+strip, transport controls), config form, and pairing form — styled with
+a small hand-written stylesheet, no UI framework.
+
+- [x] Scaffold the React + TypeScript app (`web/`), wired into
+      `docker-compose.yml` — already existed from Phase 0; found and
+      fixed a real bug in it (see below) rather than just building on top
+- [x] Implement login/auth against the Memories API — `api/src/auth/`
+      (new), `POST /auth/login` + `GET /auth/me`; no self-registration UI
+      on purpose (§12: single admin-capable user model), accounts
+      provisioned via `npm run create-user` (`api/scripts/create-user.mjs`)
+- [x] Implement the TV list pane: all paired TVs, online/offline status,
+      current album at a glance — `TvListPane.tsx`; online is computed
+      server-side (`lastSeenAt` within 90s, 3x the heartbeat interval)
+- [x] Implement the per-TV detail pane: current image + full EXIF, and a
+      next-queue thumbnail strip (clickable for metadata) — `TvDetailPane.tsx`,
+      polls `GET /tvs/:id` every 8s
+- [x] Implement the per-TV config form: album, interval, playback mode,
+      mat mode — `ConfigForm.tsx` (also exposes `disconnectedBehavior`,
+      not just the four named fields, since the endpoint already accepted
+      it)
+- [x] Implement "Save / Push to TV" — bumps config version, regenerates
+      the queue, and notifies the TV — reuses the existing `PUT
+      .../config` → `regenerateQueue` path unchanged; the TV picks it up
+      on its next `/playlist` poll
+- [x] Implement transport controls (next/previous/pause/resume) wired to
+      the command queue — `TransportControls.tsx`
+- [x] Implement the pairing UI: enter a code, name the TV — `PairingForm.tsx`.
+      **"assign permitted users" deliberately not built**: still the §12
+      single-admin-user default: every logged-in user can see/control
+      every TV; `TvPermission` stays unused until that default is revisited
+- [x] Implement the album picker sourced from `GET /api/v1/albums` —
+      used in `ConfigForm.tsx`; the also-unused `Album` local-cache table
+      from Phase 0 stays unused too — hitting Immich live for an
+      admin-only, low-frequency picker is simpler than keeping a cache in
+      sync for no real benefit
+- [x] Layout/usability pass matching the sketch in §4.2 — left TV list /
+      right detail pane, dark gallery-toned theme consistent with the
+      product's own aesthetic
+
+### Verified against the real stack, through the real UI — not curl this time
+
+Logged in, paired a real TV, configured it with the real 58-photo album,
+saved/pushed config, clicked transport controls, and clicked a next-queue
+thumbnail for its metadata — all driven through an actual headless
+Chromium browser (Playwright, installed ad hoc in the scratchpad, not
+added to the project) against the real docker-compose stack and the real
+physical TV, with screenshots at each step and `console --errors`
+checked after every interaction. Three real bugs turned up this way,
+none of them visible from `tsc`/unit tests alone:
+
+1. **`web/Dockerfile` / `docker-compose.yml` never actually applied
+   `VITE_API_BASE_URL`.** It was set as a container `environment:` var,
+   which only affects the running process — but Vite bakes `VITE_*` vars
+   into the bundle at *build* time, and the build stage never received
+   it. The dashboard would have shipped hardcoded to
+   `http://localhost:4000` regardless of `.env`. Fixed by passing it as
+   a Docker build `ARG` instead.
+2. **`@fastify/cors@11.x` requires Fastify 5**; this project pins
+   Fastify 4 (`^4.27.0`). `npm install @fastify/cors` grabbed the latest
+   major without checking, and the API container crash-looped on boot
+   (`FST_ERR_PLUGIN_VERSION_MISMATCH`) — never caught locally since
+   `npm test`/`tsc` don't boot the real Fastify instance. Pinned to
+   `^9.0.1`, the last major compatible with Fastify 4.
+3. **A TV paired before its album was configured got stuck forever.**
+   `PlaybackController.start()`'s empty-queue retry loop (Phase 3) was
+   bounded — 10 attempts, then permanently gave up with no further retry
+   of any kind, even after a real queue later appeared server-side. Since
+   pairing and configuring are two separate dashboard steps by design
+   (§5.9 then §4.2), this is the *normal* order of operations, not an
+   edge case — and it silently broke the exact flow this phase's pairing
+   UI enables. Fixed by removing the permanent give-up: fast retries
+   (3s) for the first ~30s (Phase 3's original "queue regen in flight"
+   race), then a gentle indefinite retry (every 20s) forever after —
+   there's no scenario where a kiosk display should ever stop trying.
+   Confirmed fixed end-to-end: paired via the real UI, configured via the
+   real UI, watched `currentPresentationId` populate ~30s later without
+   restarting the app.
+
+Also caught (not a bug, but worth recording): `LoginScreen.tsx` was
+catching every login failure — wrong password, network error, server
+unreachable, anything — into the same generic "Invalid email or
+password" message. That's the right call specifically for a real 401 (an
+intentional, security-conscious choice — never reveal whether an email
+exists), but it actively hid the real cause of bug #2 above during
+testing. Narrowed to only show that message for an actual 401; anything
+else now says the API couldn't be reached.
 
 ## Phase 7 — Resilience
 

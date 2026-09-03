@@ -108,7 +108,7 @@ async function main(): Promise<void> {
     }
   });
 
-  setInterval(() => api.sendHeartbeat(deviceId), HEARTBEAT_INTERVAL_MS);
+  setInterval(() => api.sendHeartbeat(deviceId, controller.currentStatus ?? undefined), HEARTBEAT_INTERVAL_MS);
 
   setInterval(async () => {
     const commands = await api.pollCommands(deviceId);

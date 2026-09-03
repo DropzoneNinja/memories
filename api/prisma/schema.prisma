@@ -80,6 +80,14 @@ model Tv {
   // `position`), so /playlist can hand out the next batch and loop the
   // album once exhausted. Reset to 0 whenever the queue is regenerated.
   lastServedPosition   Int             @default(0)
+  // What the TV last reported actually displaying — distinct from
+  // `lastServedPosition` (a hand-out cursor into batched /playlist
+  // requests, which runs ahead of what's actually on screen). Reported
+  // by the TV alongside its regular heartbeat (§5.10, extended in Phase
+  // 6 so Memories Web can show "currently displaying" + EXIF, per §4.2).
+  // Nullable: unset before the TV's first heartbeat with status.
+  currentPresentationId String?
+  paused               Boolean         @default(false)
   createdAt            DateTime        @default(now())
   configurations       Configuration[]
   queueItems           QueueItem[]
