@@ -46,11 +46,26 @@ export function Dashboard() {
     setSelectedId(tvId);
   }
 
+  function handleDeleted(tvId: string): void {
+    setTvs((prev) => prev.filter((tv) => tv.id !== tvId));
+    // Falling back to null lets the effect above auto-select whatever's
+    // left (or show the empty state if that was the last one) instead of
+    // pointing at a TV that no longer exists.
+    setSelectedId((prev) => (prev === tvId ? null : prev));
+  }
+
   const selectedTv = tvs.find((tv) => tv.id === selectedId) ?? null;
 
   return (
     <div className="dashboard">
-      <TvListPane tvs={tvs} albums={albums} selectedId={selectedId} onSelect={setSelectedId} onPaired={handlePaired} />
+      <TvListPane
+        tvs={tvs}
+        albums={albums}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+        onPaired={handlePaired}
+        onDeleted={handleDeleted}
+      />
       <div className="detail-pane">
         <header className="topbar">
           <span className="current-user">{user?.email}</span>

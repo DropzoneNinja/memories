@@ -674,6 +674,34 @@ featured photo in the detail pane, showing where it was taken.
       real assets (~2.7km apart, different suburbs), not just eyeballing
       the screenshot.
 
+### Addendum: delete/remove a TV
+
+Every fresh `npm run deploy` wipes the app's `localStorage` and re-pairs
+under a new device id (known since Phase 3) — across Phases 4-6 testing
+this left 8 stale "Lounge" rows cluttering the TV list with no way to
+clean them up.
+
+- [x] `DELETE /api/v1/tvs/:id` (new, `requireAuth`) — schema.prisma's
+      `Configuration`/`QueueItem`/`Command`/`TvPermission` relations to
+      `Tv` now cascade-delete (migration `20260903163704_tv_delete_cascade`);
+      `AuditLog`'s stays `SetNull` (already the default for its
+      already-optional relation, so no migration diff there) — deleting a
+      TV shouldn't erase its own history, just its live state
+- [x] A small delete button per row in `TvListPane.tsx`, hidden until
+      hover so the list doesn't read as "every row screaming delete at
+      you," behind a native `confirm()` naming the TV and its online/
+      offline status (cheap insurance against deleting the one that's
+      actually live by mistake)
+- [x] `Dashboard.tsx` clears the selection and falls back to whatever's
+      left if the deleted TV was the one being viewed
+- [x] **Verified through the real docker-built dashboard**: deleted 7 of
+      8 stale entries via real hover+click+confirm interactions, left
+      with exactly the one real online TV, its data (current image,
+      EXIF, map, next queue, config) fully intact afterward. Confirmed
+      directly against Postgres: zero orphaned `Configuration`/
+      `QueueItem` rows, and the unrelated `AssetColourAnalysis` cache
+      (keyed by Immich asset id, not TV) untouched at 49 rows
+
 ## Phase 7 — Resilience
 
 *(Milestone 7, §5.8, §5.10)*

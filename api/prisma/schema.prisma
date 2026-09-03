@@ -98,7 +98,7 @@ model Tv {
 
 model TvPermission {
   id     String @id @default(cuid())
-  tv     Tv     @relation(fields: [tvId], references: [id])
+  tv     Tv     @relation(fields: [tvId], references: [id], onDelete: Cascade)
   tvId   String
   user   User   @relation(fields: [userId], references: [id])
   userId String
@@ -137,7 +137,7 @@ model AssetColourAnalysis {
 // for a given `tvId` is the active configuration.
 model Configuration {
   id                   String               @id @default(cuid())
-  tv                   Tv                   @relation(fields: [tvId], references: [id])
+  tv                   Tv                   @relation(fields: [tvId], references: [id], onDelete: Cascade)
   tvId                 String
   version              Int
   albumIds             String[]
@@ -154,7 +154,7 @@ model Configuration {
 // A generated Presentation (§5.1) queued for a TV.
 model QueueItem {
   id              String   @id @default(cuid())
-  tv              Tv       @relation(fields: [tvId], references: [id])
+  tv              Tv       @relation(fields: [tvId], references: [id], onDelete: Cascade)
   tvId            String
   position        Int
   presentationId  String   @unique
@@ -171,7 +171,7 @@ model QueueItem {
 
 model Command {
   id          String        @id @default(cuid())
-  tv          Tv            @relation(fields: [tvId], references: [id])
+  tv          Tv            @relation(fields: [tvId], references: [id], onDelete: Cascade)
   tvId        String
   type        CommandType
   status      CommandStatus @default(PENDING)
@@ -183,7 +183,11 @@ model AuditLog {
   id        String   @id @default(cuid())
   user      User?    @relation(fields: [userId], references: [id])
   userId    String?
-  tv        Tv?      @relation(fields: [tvId], references: [id])
+  // SetNull, not Cascade: deleting a TV (routes/tvs.ts's DELETE
+  // endpoint) should still leave its audit history behind — an audit
+  // log existing to record "this happened" and then vanishing along
+  // with the thing it was about would defeat the point of an audit log.
+  tv        Tv?      @relation(fields: [tvId], references: [id], onDelete: SetNull)
   tvId      String?
   action    String
   detail    Json?

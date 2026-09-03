@@ -149,14 +149,7 @@ h3 {
 .tv-list-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 10px 10px;
-  background: transparent;
-  border: none;
   border-radius: 6px;
-  cursor: pointer;
-  text-align: left;
 }
 
 .tv-list-item:hover {
@@ -166,6 +159,54 @@ h3 {
 .tv-list-item.selected {
   background: var(--panel-alt);
   box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.tv-list-item-select {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tv-list-item-delete {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin-right: 6px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  /* Present but unobtrusive by default — only stands out (and turns
+     danger-red) on hover/focus, so the list doesn't read as "every row
+     has a delete button screaming at you." */
+  opacity: 0;
+}
+
+.tv-list-item:hover .tv-list-item-delete,
+.tv-list-item-delete:focus-visible {
+  opacity: 1;
+}
+
+.tv-list-item-delete:hover {
+  background: rgba(217, 119, 107, 0.15);
+  color: var(--danger);
+}
+
+.tv-list-item-delete:disabled {
+  opacity: 1;
+  cursor: default;
 }
 
 .tv-list-item-text {

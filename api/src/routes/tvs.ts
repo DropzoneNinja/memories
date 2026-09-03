@@ -253,4 +253,27 @@ export async function tvRoutes(app: FastifyInstance): Promise<void> {
       return prisma.command.create({ data: { tvId: tv.id, type: parsed.data.type } });
     },
   );
+
+  // Unpairs and permanently removes a TV — every fresh `npm run deploy`
+  // wipes the app's localStorage and re-pairs under a new device id
+  // (known Phase 3 behaviour), which otherwise leaves stale rows behind
+  // indefinitely with no way to clean them up. Configurations/QueueItems/
+  // Commands/TvPermissions cascade-delete with it (schema.prisma); its
+  // AuditLog rows are kept, with tvId set to null, so removing a TV
+  // doesn't erase its history. If the deleted TV is still physically
+  // running, it simply starts getting 404s from every endpoint it polls
+  // (all of which already handle "TV not found" gracefully) — there's no
+  // separate "unpair" signal to push to a device with no login concept
+  // of its own (§6, §13).
+  app.delete<{ Params: { id: string } }>(
+    '/api/v1/tvs/:id',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const tv = await prisma.tv.findUnique({ where: { id: request.params.id } });
+      if (!tv) return reply.code(404).send({ error: 'TV not found' });
+
+      await prisma.tv.delete({ where: { id: tv.id } });
+      return reply.code(204).send();
+    },
+  );
 }

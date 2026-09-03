@@ -78,6 +78,7 @@ export const api = {
     request<Configuration>(`/api/v1/tvs/${id}/config`, { method: 'PUT', body: JSON.stringify(body) }),
   sendCommand: (id: string, type: CommandType) =>
     request(`/api/v1/tvs/${id}/commands`, { method: 'POST', body: JSON.stringify({ type }) }),
+  deleteTv: (id: string) => request<void>(`/api/v1/tvs/${id}`, { method: 'DELETE' }),
 
   listAlbums: () => request<AlbumSummary[]>('/api/v1/albums'),
   getAssetLocation: (assetId: string) => request<AssetLocation>(`/api/v1/assets/${assetId}/location`),
