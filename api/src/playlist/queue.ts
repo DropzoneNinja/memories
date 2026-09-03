@@ -1,0 +1,129 @@
+import type { Configuration, QueueItem } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { prisma } from '../db.js';
+import { getImmichClient } from '../immich/config.js';
+import { buildPresentation } from './presentation.js';
+import { groupForComposition } from '../composition/group.js';
+
+// Presentation fields are plain JSON-serializable data by construction
+// (presentation.ts), but their named TS interfaces don't structurally
+// satisfy Prisma's index-signature-based InputJsonValue — this just
+// asserts that known-safe shape rather than widening the field types.
+function toJson(value: unknown): Prisma.InputJsonValue {
+  return value as Prisma.InputJsonValue;
+}
+
+// Tiny deterministic PRNG (mulberry32) seeded from a string, so shuffling
+// the same TV+config version always yields the same order rather than a
+// fresh random one on every regeneration.
+function seededShuffle<T>(items: T[], seed: string): T[] {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) {
+    h = (Math.imul(31, h) + seed.charCodeAt(i)) | 0;
+  }
+  let state = h >>> 0;
+  const rand = (): number => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+// Regenerate a TV's whole materialized queue from its current
+// configuration — called whenever the config changes (PUT .../config).
+// Fetches the album from Immich once and persists the result as
+// QueueItems, rather than hitting Immich on every /playlist poll.
+export async function regenerateQueue(tvId: string, config: Configuration): Promise<void> {
+  const albumId = config.albumIds[0];
+  if (!albumId) {
+    await prisma.$transaction([
+      prisma.queueItem.deleteMany({ where: { tvId } }),
+      prisma.tv.update({ where: { id: tvId }, data: { lastServedPosition: 0 } }),
+    ]);
+    return;
+  }
+
+  const immich = getImmichClient();
+  const [album, assets] = await Promise.all([
+    immich.getAlbum(albumId),
+    immich.listAlbumAssets(albumId),
+  ]);
+
+  // Albums can contain videos — filter to images only (video support is
+  // explicitly out of scope for v1, PROJECT.md §14).
+  const images = assets.filter((a) => a.type === 'IMAGE');
+  const ordered =
+    config.playbackMode === 'SHUFFLE' ? seededShuffle(images, `${tvId}:${config.version}`) : images;
+
+  // Composition engine (PROJECT.md §5.2, Phase 4): groups the ordered
+  // images into displayable compositions (single landscape, 2/3-up
+  // portrait groups) before turning each group into a QueueItem — one row
+  // per *composition*, not per image, so a 3-portrait group is one
+  // QueueItem the TV displays for one `intervalSeconds` interval, not
+  // three. Runs on `ordered` so grouping is deterministic for a given
+  // shuffle/sequential order, per the same seed as the shuffle itself.
+  const groups = groupForComposition(ordered);
+
+  const rows = groups.map((group, index) => {
+    const presentation = buildPresentation(group, album.albumName, config.intervalSeconds);
+    return {
+      tvId,
+      position: index,
+      presentationId: presentation.presentationId,
+      layout: toJson(presentation.layout),
+      background: toJson(presentation.background),
+      frame: toJson(presentation.frame),
+      transition: toJson(presentation.transition),
+      assets: toJson(presentation.assets),
+      durationSeconds: presentation.duration,
+    };
+  });
+
+  await prisma.$transaction([
+    prisma.queueItem.deleteMany({ where: { tvId } }),
+    prisma.queueItem.createMany({ data: rows }),
+    prisma.tv.update({ where: { id: tvId }, data: { lastServedPosition: 0 } }),
+  ]);
+}
+
+export interface PlaylistResult {
+  configurationVersion: number;
+  items: QueueItem[];
+}
+
+// Hands out the next `count` items after wherever this TV last left off,
+// looping the materialized queue once exhausted (a simple stand-in for
+// the real disconnected/repeat policies, which are Phase 7's job).
+export async function getNextPlaylistItems(deviceId: string, count: number): Promise<PlaylistResult | null> {
+  const tv = await prisma.tv.findUnique({ where: { deviceId } });
+  if (!tv) return null;
+
+  const [allItems, latestConfig] = await Promise.all([
+    prisma.queueItem.findMany({ where: { tvId: tv.id }, orderBy: { position: 'asc' } }),
+    prisma.configuration.findFirst({ where: { tvId: tv.id }, orderBy: { version: 'desc' } }),
+  ]);
+
+  if (allItems.length === 0) {
+    return { configurationVersion: latestConfig?.version ?? 0, items: [] };
+  }
+
+  const n = Math.min(count, allItems.length);
+  const items: QueueItem[] = [];
+  let position = tv.lastServedPosition % allItems.length;
+  for (let i = 0; i < n; i++) {
+    items.push(allItems[position]);
+    position = (position + 1) % allItems.length;
+  }
+
+  await prisma.tv.update({ where: { id: tv.id }, data: { lastServedPosition: position } });
+
+  return { configurationVersion: latestConfig?.version ?? 0, items };
+}

@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-memories}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-memories}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      # host 5433 -> avoid clashing with any local Postgres already on 5432
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-memories}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-memories}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-memories}
+      IMMICH_BASE_URL: ${IMMICH_BASE_URL}
+      IMMICH_API_KEY: ${IMMICH_API_KEY}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      PORT: 4000
+    ports:
+      # Must stay reachable from the TV's IoT VLAN (10.10.40.0/24) as well as
+      # from Memories Web — confirm firewall rules allow inbound here too,
+      # not just outbound from this host (see PROJECT.md §12).
+      - "4000:4000"
+
+  web:
+    build:
+      context: ./web
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      VITE_API_BASE_URL: ${WEB_API_BASE_URL:-http://localhost:4000}
+    ports:
+      - "5173:5173"
+
+volumes:
+  postgres_data:

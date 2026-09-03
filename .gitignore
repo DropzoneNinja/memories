@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+*.log
+.DS_Store
+
+# Environment / secrets
+.env
+.env.local
+
+# Tizen build output
+tv/.buildResult/
+tv/*.wgt
+
+# Prisma client output (generated, not source)
+api/generated/

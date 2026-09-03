@@ -1,0 +1,161 @@
+// Initial data model — see PROJECT.md §7 (Persistence) and §6 (Responsibility
+// Split). Expect this to grow as Phases 2-7 land; nothing here is final.
+
+generator client {
+  provider = "prisma-client-js"
+  // "native" resolves correctly wherever `prisma generate` actually runs
+  // (macOS locally, Debian-slim inside the API's Docker build stage) — no
+  // extra target needed since the Docker image isn't musl-based (see
+  // api/Dockerfile; Alpine's musl libc has a real getaddrinfo/DNS bug
+  // that broke outbound fetch() to the Immich server, found in Phase 2).
+  binaryTargets = ["native"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PlaybackMode {
+  SEQUENTIAL
+  SHUFFLE
+}
+
+enum MatMode {
+  AUTOMATIC
+  NEUTRAL
+  WARM
+  COOL
+  DARK
+  LIGHT
+  COMPLEMENTARY
+  ANALOGOUS
+}
+
+enum DisconnectedBehavior {
+  CONTINUE_QUEUE
+  REPEAT_QUEUE
+  FREEZE
+}
+
+enum CommandType {
+  NEXT
+  PREVIOUS
+  PAUSE
+  RESUME
+}
+
+enum CommandStatus {
+  PENDING
+  DELIVERED
+}
+
+model User {
+  id           String         @id @default(cuid())
+  email        String         @unique
+  passwordHash String
+  isAdmin      Boolean        @default(false)
+  createdAt    DateTime       @default(now())
+  permissions  TvPermission[]
+  auditLogs    AuditLog[]
+}
+
+model Tv {
+  id                   String          @id @default(cuid())
+  deviceId             String          @unique
+  // Nullable until pairing completes — the Tv row is created at the
+  // *request*-pairing step (§5.9), before a human has named it.
+  name                 String?
+  pairingCode          String?         @unique
+  pairingCodeExpiresAt DateTime?
+  pairedAt             DateTime?
+  lastSeenAt           DateTime?
+  // Cursor into that TV's materialized QueueItems (ordered by
+  // `position`), so /playlist can hand out the next batch and loop the
+  // album once exhausted. Reset to 0 whenever the queue is regenerated.
+  lastServedPosition   Int             @default(0)
+  createdAt            DateTime        @default(now())
+  configurations       Configuration[]
+  queueItems           QueueItem[]
+  commands             Command[]
+  permissions          TvPermission[]
+  auditLogs            AuditLog[]
+}
+
+model TvPermission {
+  id     String @id @default(cuid())
+  tv     Tv     @relation(fields: [tvId], references: [id])
+  tvId   String
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  @@unique([tvId, userId])
+}
+
+// Local cache of Immich album metadata for the album picker — asset content
+// itself always comes from Immich on demand, never mirrored here.
+model Album {
+  id            String    @id @default(cuid())
+  immichAlbumId String    @unique
+  name          String
+  assetCount    Int       @default(0)
+  lastSyncedAt  DateTime?
+  createdAt     DateTime  @default(now())
+}
+
+// One row per config change, versioned per TV (§5.10). The highest `version`
+// for a given `tvId` is the active configuration.
+model Configuration {
+  id                   String               @id @default(cuid())
+  tv                   Tv                   @relation(fields: [tvId], references: [id])
+  tvId                 String
+  version              Int
+  albumIds             String[]
+  intervalSeconds      Int                  @default(600)
+  playbackMode         PlaybackMode         @default(SHUFFLE)
+  matMode              MatMode              @default(AUTOMATIC)
+  disconnectedBehavior DisconnectedBehavior @default(CONTINUE_QUEUE)
+  cacheSize            Int                  @default(8)
+  createdAt            DateTime             @default(now())
+
+  @@unique([tvId, version])
+}
+
+// A generated Presentation (§5.1) queued for a TV.
+model QueueItem {
+  id              String   @id @default(cuid())
+  tv              Tv       @relation(fields: [tvId], references: [id])
+  tvId            String
+  position        Int
+  presentationId  String   @unique
+  layout          Json
+  background      Json
+  frame           Json
+  transition      Json
+  assets          Json
+  durationSeconds Int
+  createdAt       DateTime @default(now())
+
+  @@index([tvId, position])
+}
+
+model Command {
+  id          String        @id @default(cuid())
+  tv          Tv            @relation(fields: [tvId], references: [id])
+  tvId        String
+  type        CommandType
+  status      CommandStatus @default(PENDING)
+  createdAt   DateTime      @default(now())
+  deliveredAt DateTime?
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  user      User?    @relation(fields: [userId], references: [id])
+  userId    String?
+  tv        Tv?      @relation(fields: [tvId], references: [id])
+  tvId      String?
+  action    String
+  detail    Json?
+  createdAt DateTime @default(now())
+}

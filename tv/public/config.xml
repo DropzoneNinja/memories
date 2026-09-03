@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Starting point only — Tizen's package/id rules (10-char alphanumeric
+  package id, required_version matching the actual firmware) need
+  validating with Tizen Studio once we reach Phase 1 packaging/signing
+  against the real QA32LS03CBWXXY.
+-->
+<widget xmlns="http://www.w3.org/ns/widgets"
+        xmlns:tizen="http://tizen.org/ns/widgets"
+        id="http://zone.wreck/memories"
+        version="0.1.0"
+        viewmodes="maximized">
+    <tizen:application id="zwreckmemo.Memories"
+                        package="zwreckmemo"
+                        required_version="6.0"/>
+    <name>Memories</name>
+    <content src="index.html"/>
+    <icon src="icon.png"/>
+    <feature name="http://tizen.org/feature/screen.size.all"/>
+    <tizen:profile name="tv-samsung"/>
+    <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
+    <tizen:privilege name="http://tizen.org/privilege/internet"/>
+    <!-- Without this, Tizen's WAC-style access whitelist defaults to
+         blocking fetch/XHR to any origin outside the packaged app itself
+         (found in Phase 3 — the TV silently never reached the API at
+         all). Fine to leave wide open for a personal LAN app whose API
+         address isn't fixed yet. -->
+    <access origin="*" subdomains="true"/>
+    <tizen:setting screen-orientation="landscape"
+                   context-menu="disable"
+                   background-support="disable"
+                   encryption="disable"
+                   install-location="auto"
+                   hwkey-event="enable"/>
+</widget>

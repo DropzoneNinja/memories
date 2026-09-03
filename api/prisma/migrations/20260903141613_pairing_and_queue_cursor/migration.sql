@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Tv" ADD COLUMN     "lastServedPosition" INTEGER NOT NULL DEFAULT 0,
+ALTER COLUMN "name" DROP NOT NULL;
