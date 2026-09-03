@@ -5,6 +5,7 @@ import type {
   AssetLocation,
   Configuration,
   Presentation,
+  PresentationAsset,
   PresentationAssetMetadata,
   TvDetail,
   TvSummary,
@@ -43,8 +44,17 @@ function locationLabel(location: AssetLocation | null): string | null {
   return [location.city, location.state, location.country].filter(Boolean).join(', ') || null;
 }
 
-function firstAsset(presentation: Presentation | null | undefined) {
-  return presentation?.assets[0] ?? null;
+// A composition can be 1-3 images (PROJECT.md §5.2's composition engine
+// — single/two-portrait/three-portrait). `presentation.assets` isn't
+// guaranteed to already be in left-to-right slot order, so this resolves
+// each slot to its asset explicitly by id — the same approach the TV's
+// own PresentationRenderer uses, and the same bug class as its original
+// "only ever renders assets[0]" issue from Phase 4, just here instead of
+// there.
+function slotAssets(presentation: Presentation | null | undefined): PresentationAsset[] {
+  if (!presentation) return [];
+  const byId = new Map(presentation.assets.map((a) => [a.id, a]));
+  return presentation.layout.slots.map((slot) => byId.get(slot.assetId)).filter((a): a is PresentationAsset => Boolean(a));
 }
 
 export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
@@ -87,7 +97,12 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
   const effectiveTv: TvSummary = detail ? { ...tv, online: detail.online, paused: detail.paused } : tv;
 
   const featured = selectedNextIndex !== null ? (detail?.next[selectedNextIndex] ?? null) : (detail?.current ?? null);
-  const featuredAsset = firstAsset(featured);
+  const featuredSlots = slotAssets(featured);
+  // The map/location shows the composition's first (leftmost) photo —
+  // a 2/3-up composition's photos are near-always taken moments apart in
+  // the same place, and picking one keeps the map to one marker rather
+  // than needing its own per-photo click target.
+  const primaryAsset = featuredSlots[0] ?? null;
 
   // Location is fetched on demand per focused asset (never part of
   // Presentation/TvDetail — the TV must never receive it, PROJECT.md
@@ -95,7 +110,7 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
   // by default, whatever the user clicked in the "next" strip otherwise,
   // and back to current when they click the featured photo itself.
   useEffect(() => {
-    if (!featuredAsset) {
+    if (!primaryAsset) {
       setLocation(null);
       setLocationLoading(false);
       return;
@@ -103,7 +118,7 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
     let cancelled = false;
     setLocationLoading(true);
     api
-      .getAssetLocation(featuredAsset.id)
+      .getAssetLocation(primaryAsset.id)
       .then((result) => {
         if (!cancelled) setLocation(result);
       })
@@ -116,7 +131,7 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [featuredAsset?.id]);
+  }, [primaryAsset?.id]);
 
   return (
     <div className="tv-detail-pane">
@@ -130,7 +145,7 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
       {error && <p className="form-error">{error}</p>}
 
       <section className="current-image">
-        {featured && featuredAsset ? (
+        {featured && featuredSlots.length > 0 ? (
           <>
             <button
               type="button"
@@ -139,15 +154,21 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
               onClick={() => setSelectedNextIndex(null)}
               title={selectedNextIndex !== null ? 'Back to the currently displaying photo' : 'Currently displaying'}
             >
-              <img src={api.resolveAssetUrl(featuredAsset.url)} alt="" />
+              {featuredSlots.map((asset) => (
+                <img key={asset.id} src={api.resolveAssetUrl(asset.url)} alt="" />
+              ))}
             </button>
             <div className="exif">
-              <p className="filename">{featuredAsset.metadata.filename}</p>
-              <p className="album">{featuredAsset.metadata.album}</p>
-              {exifLines(featuredAsset.metadata).map((line) => (
-                <p key={line} className="exif-line">
-                  {line}
-                </p>
+              <p className="album">{featuredSlots[0].metadata.album}</p>
+              {featuredSlots.map((asset) => (
+                <div key={asset.id} className="exif-asset">
+                  <p className="filename">{asset.metadata.filename}</p>
+                  {exifLines(asset.metadata).map((line) => (
+                    <p key={line} className="exif-line">
+                      {line}
+                    </p>
+                  ))}
+                </div>
               ))}
               {selectedNextIndex !== null && <p className="hint">Showing an upcoming photo — click it to return.</p>}
             </div>
@@ -169,8 +190,8 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
         <h3>Next</h3>
         <div className="thumbnail-row">
           {(detail?.next ?? []).map((item, i) => {
-            const asset = firstAsset(item);
-            if (!asset) return null;
+            const slots = slotAssets(item);
+            if (slots.length === 0) return null;
             return (
               <button
                 key={item.presentationId}
@@ -179,7 +200,9 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
                 onClick={() => setSelectedNextIndex(i)}
                 title="Show this photo's details and location above"
               >
-                <img src={api.resolveAssetUrl(asset.url)} alt="" />
+                {slots.map((asset) => (
+                  <img key={asset.id} src={api.resolveAssetUrl(asset.url)} alt="" />
+                ))}
               </button>
             );
           })}

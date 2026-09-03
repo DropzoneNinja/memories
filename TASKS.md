@@ -674,6 +674,37 @@ featured photo in the detail pane, showing where it was taken.
       real assets (~2.7km apart, different suburbs), not just eyeballing
       the screenshot.
 
+### Addendum: dashboard only ever showed one photo of a composition
+
+User-caught, from actually looking at the dashboard rather than a
+screenshot: the featured-photo box and the "next" thumbnails only ever
+rendered `presentation.assets[0]`, regardless of how many photos the
+composition actually had. Real data confirmed it immediately — a
+two-portrait item genuinely showed just one of its two photos, in both
+places. The exact same bug class as Phase 4's original TV-side
+`PresentationRenderer` issue (`assets[0]` only), just never ported over
+when the dashboard was built in Phase 6 — composition-awareness had to
+be added there too, it didn't come for free.
+
+- [x] `TvDetailPane.tsx`: new `slotAssets()` resolves every
+      `layout.slots` entry to its asset by id (same approach as the TV's
+      `PresentationRenderer.render()`), used for both the featured box
+      and the next-strip thumbnails instead of a single first-asset call
+- [x] Featured box now renders one `<img>` per slot, each an equal share
+      of the frame, contain-fit (never crop/stretch, same rule as the TV)
+      — verified against a real two-portrait item: both photos shown
+      correctly proportioned, no distortion
+- [x] EXIF panel shows a block per photo in the composition (filename +
+      its own exposure/timestamp), not just one — album shown once at
+      the top since it's the same for every photo in the composition
+- [x] Next-strip thumbnails also split into one slice per photo instead
+      of only showing the first — confirmed via a real two-portrait
+      thumbnail rendering 2 `<img>` elements, not 1
+- [x] Location map intentionally still shows one marker (the
+      composition's first/leftmost photo) — a 2/3-up group is normally
+      photos taken moments apart in the same place, and per-photo map
+      selection wasn't asked for
+
 ### Addendum: delete/remove a TV
 
 Every fresh `npm run deploy` wipes the app's `localStorage` and re-pairs
