@@ -30,6 +30,12 @@ enum MatMode {
   LIGHT
   COMPLEMENTARY
   ANALOGOUS
+  // Fixed neutrals (§5.3: "plus fixed neutrals — white, black, walnut/
+  // wood") — unlike every mode above, these ignore the photo's dominant
+  // colour entirely and always render the same swatch.
+  WHITE
+  BLACK
+  WOOD
 }
 
 enum DisconnectedBehavior {
@@ -101,6 +107,22 @@ model Album {
   assetCount    Int       @default(0)
   lastSyncedAt  DateTime?
   createdAt     DateTime  @default(now())
+}
+
+// Per-Immich-asset colour analysis cache (§5.3: "cache colour-analysis
+// results by asset ID/hash — never re-analyse the same image twice").
+// Keyed by the Immich asset id, shared across every TV/album/composition
+// that happens to include that asset — the expensive step (decoding the
+// image and clustering its pixels) only ever runs once per asset, ever.
+// Stores OKLCH, not a derived hex, so it stays the source of truth for
+// any future colour maths without lossy round-tripping through a string.
+model AssetColourAnalysis {
+  id            String   @id @default(cuid())
+  immichAssetId String   @unique
+  lightness     Float
+  chroma        Float
+  hue           Float
+  analyzedAt    DateTime @default(now())
 }
 
 // One row per config change, versioned per TV (§5.10). The highest `version`

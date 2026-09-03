@@ -290,6 +290,20 @@ For every composition, server-side (Memories API):
 Cache colour-analysis results by asset ID/hash — never re-analyse the same
 image repeatedly.
 
+**Implemented in Phase 5** (`api/src/colour/`): candidates are built on
+OKLCH hue rotation of the composition's dominant colour, not RGB
+arithmetic; scoring is AUTOMATIC-only, every override mode picks a
+specific candidate directly. The `WHITE`/`BLACK`/`WOOD` fixed neutrals
+named above weren't actually in the `MatMode` enum until Phase 5 added
+them (a gap from when the schema was first scaffolded in Phase 0, before
+this section existed in detail). As in Phase 4, an aesthetic threshold
+that looked fine in unit tests turned out wrong against a real photo —
+the `darker` candidate's lightness floor rendered indistinguishable from
+`BLACK` until raised (see TASKS.md Phase 5). Colour analysis is cached by
+Immich asset id in a new `AssetColourAnalysis` table; confirmed against
+the real stack that a warm regeneration is ~10x faster and produces
+byte-identical mats.
+
 ### 5.4 Faux 3D Framing
 
 The mat can optionally carry a subtle physical-gallery appearance: a
@@ -301,6 +315,12 @@ look. The effect must be **extremely subtle** — the goal is
 
 not a graphic-design card or a drop-shadow-heavy web UI. Default to
 restrained.
+
+**Implemented in Phase 5**: driven by the server's `frame` field
+(`tv/src/render/ImageStage.ts`), not hardcoded on the TV — a soft
+box-shadow plus a faint inset top highlight per photo, and a very low-
+opacity radial-gradient vignette on the mat itself. No raised/recessed
+"bevel depth" variation yet; nothing in testing so far has called for it.
 
 ### 5.5 Transitions
 

@@ -4,6 +4,10 @@ import { prisma } from '../db.js';
 import { getImmichClient } from '../immich/config.js';
 import { buildPresentation } from './presentation.js';
 import { groupForComposition } from '../composition/group.js';
+import { getOrAnalyzeAssetColour, prismaColourStore } from '../colour/cache.js';
+import { extractDominantColour } from '../colour/dominantColour.js';
+import { combineOklch, oklchToHex } from '../colour/oklch.js';
+import { resolveMatColour } from '../colour/matMode.js';
 
 // Presentation fields are plain JSON-serializable data by construction
 // (presentation.ts), but their named TS interfaces don't structurally
@@ -72,20 +76,37 @@ export async function regenerateQueue(tvId: string, config: Configuration): Prom
   // shuffle/sequential order, per the same seed as the shuffle itself.
   const groups = groupForComposition(ordered);
 
-  const rows = groups.map((group, index) => {
-    const presentation = buildPresentation(group, album.albumName, config.intervalSeconds);
-    return {
-      tvId,
-      position: index,
-      presentationId: presentation.presentationId,
-      layout: toJson(presentation.layout),
-      background: toJson(presentation.background),
-      frame: toJson(presentation.frame),
-      transition: toJson(presentation.transition),
-      assets: toJson(presentation.assets),
-      durationSeconds: presentation.duration,
-    };
-  });
+  // Colour/mat engine (PROJECT.md §5.3, Phase 5): one mat colour per
+  // composition, derived from all its images' dominant colours combined
+  // (not just the first one). Per-image analysis is cached by Immich
+  // asset id (colour/cache.ts) — an asset appearing in many TVs/albums/
+  // regenerations over time is only ever analysed once. Runs group-by-group
+  // in parallel; each group's own slot analyses also run in parallel.
+  const rows = await Promise.all(
+    groups.map(async (group, index) => {
+      const colours = await Promise.all(
+        group.slots.map((slot) =>
+          getOrAnalyzeAssetColour(prismaColourStore, slot.asset.id, async () => {
+            const { body } = await immich.fetchThumbnail(slot.asset.id, 'thumbnail');
+            return extractDominantColour(Buffer.from(body));
+          }),
+        ),
+      );
+      const matColour = oklchToHex(resolveMatColour(config.matMode, combineOklch(colours)));
+      const presentation = buildPresentation(group, album.albumName, config.intervalSeconds, matColour);
+      return {
+        tvId,
+        position: index,
+        presentationId: presentation.presentationId,
+        layout: toJson(presentation.layout),
+        background: toJson(presentation.background),
+        frame: toJson(presentation.frame),
+        transition: toJson(presentation.transition),
+        assets: toJson(presentation.assets),
+        durationSeconds: presentation.duration,
+      };
+    }),
+  );
 
   await prisma.$transaction([
     prisma.queueItem.deleteMany({ where: { tvId } }),

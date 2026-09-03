@@ -31,7 +31,7 @@ export class PresentationRenderer {
       const asset = assetsById.get(slot.assetId) ?? presentation.assets[0];
       return this.resolveUrl(asset.url);
     });
-    this.stage.show(urls);
+    this.stage.show(urls, presentation.frame);
 
     if (autoAdvance) {
       this.advanceTimer = window.setTimeout(() => {

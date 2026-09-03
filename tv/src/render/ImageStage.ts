@@ -4,8 +4,55 @@
 // side per the server's layout slots (Phase 4) — each slot gets an equal
 // share of the width and contain-fits its own image independently, so a
 // two/three-portrait composition never crops or stretches any one photo
-// to match the others. Per-slot mat framing/shadow is Phase 5's job
-// (faux-3D framing); this just positions the images.
+// to match the others.
+//
+// Faux-3D framing (Phase 5, §5.4): a faint tonal gradient across the mat,
+// plus — driven by the server's `frame` field, since the TV never makes
+// its own creative decisions (§5.1) — a soft outer shadow under each
+// photo and a faint inner-edge highlight, simulating a print sitting on a
+// physical mat rather than a flat web image. Kept deliberately
+// restrained: this is "photograph -> physical mat -> shadow -> screen"
+// (§5.4), not a drop-shadow-heavy UI card.
+
+export interface FrameStyle {
+  shadow: string; // 'subtle' | 'none'
+  bevel: string; // 'inner' | 'none'
+}
+
+const NO_FRAME: FrameStyle = { shadow: 'none', bevel: 'none' };
+
+// Uniform mat margin reserved around every photo, on every side. `vmin`
+// resolves against the viewport, not each slot's own (possibly narrower)
+// box, so a two/three-portrait composition's individual photos get the
+// same real-pixel margin as a single full-screen photo — every photo
+// matted consistently, not "whatever's left after contain-fit happened
+// to land." Without this, a photo whose aspect ratio exactly matches its
+// slot touches that slot's edges directly, leaving no mat margin (and
+// nothing for the bevel highlight/shadow to show up against) on
+// whichever side(s) contain-fit maxed out — caught on real hardware: a
+// height-constrained photo touched the screen's top and bottom edges
+// exactly, so the inner-edge highlight had nowhere to render there.
+const MAT_MARGIN = '2.5vmin';
+
+function boxShadowFor(frame: FrameStyle): string {
+  const layers: string[] = [];
+  if (frame.shadow !== 'none') {
+    // The photo lifted slightly off the mat, plus a hairline edge that
+    // grounds it — both very soft, never a hard-edged web-card shadow.
+    layers.push('0 3px 14px rgba(0,0,0,0.35)', '0 0 0 1px rgba(0,0,0,0.08)');
+  }
+  if (frame.bevel !== 'none') {
+    // A full-perimeter hairline highlight — the bevel-cut inner edge of
+    // a real mat is visible all the way around a mounted print, not just
+    // along one side. `inset 0 0 0 1px` (zero offset, 1px spread) draws
+    // that evenly on all four edges; an offset inset shadow like
+    // `inset 0 1px 0` only ever paints one side, which is what this
+    // replaced (caught on real hardware: the highlight only showed up on
+    // the top edge).
+    layers.push('inset 0 0 0 1px rgba(255,255,255,0.07)');
+  }
+  return layers.join(', ');
+}
 
 export class ImageStage {
   private root: HTMLDivElement;
@@ -16,8 +63,8 @@ export class ImageStage {
     this.root = document.createElement('div');
     this.root.style.position = 'absolute';
     this.root.style.inset = '0';
-    this.root.style.background = matColor;
     this.root.style.overflow = 'hidden';
+    this.setMatColor(matColor);
 
     const makeLayer = (): HTMLDivElement => {
       const layer = document.createElement('div');
@@ -37,21 +84,24 @@ export class ImageStage {
   }
 
   setMatColor(color: string): void {
-    this.root.style.background = color;
+    // A very faint vignette over the flat mat colour — the "faint tonal
+    // gradient" §5.4 asks for. Subtle enough that it reads as a physical
+    // surface catching light unevenly, not as a visible design element.
+    this.root.style.background = `radial-gradient(ellipse at center, rgba(255,255,255,0.025), rgba(0,0,0,0.06)), ${color}`;
   }
 
   // One image per slot, left-to-right. A single-slot composition (the
   // common case) behaves exactly as before: one image, fully centered.
-  show(imageUrls: string[]): void {
+  // `frame` comes straight from the server's Presentation — the TV never
+  // decides its own framing style (§5.1).
+  show(imageUrls: string[], frame: FrameStyle = NO_FRAME): void {
     const nextIndex = this.activeLayer === 0 ? 1 : 0;
     const nextLayer = this.layers[nextIndex];
     const prevLayer = this.layers[this.activeLayer];
 
     nextLayer.innerHTML = '';
-    // A small gap between slots visually separates grouped photos until
-    // Phase 5 gives each one its own mat/shadow.
-    nextLayer.style.gap = imageUrls.length > 1 ? '1.5%' : '0';
 
+    const boxShadow = boxShadowFor(frame);
     for (const url of imageUrls) {
       const slot = document.createElement('div');
       slot.style.flex = '1 1 0';
@@ -59,6 +109,12 @@ export class ImageStage {
       slot.style.display = 'flex';
       slot.style.alignItems = 'center';
       slot.style.justifyContent = 'center';
+      // Reserves the mat margin on every side of this photo (see
+      // MAT_MARGIN) — also what separates adjacent photos in a
+      // two/three-portrait composition, so no extra inter-slot gap is
+      // needed on top of it.
+      slot.style.padding = MAT_MARGIN;
+      slot.style.boxSizing = 'border-box';
 
       const img = document.createElement('img');
       img.src = url;
@@ -66,6 +122,7 @@ export class ImageStage {
       img.style.maxWidth = '100%';
       img.style.maxHeight = '100%';
       img.style.objectFit = 'contain';
+      if (boxShadow) img.style.boxShadow = boxShadow;
       slot.appendChild(img);
       nextLayer.appendChild(slot);
     }

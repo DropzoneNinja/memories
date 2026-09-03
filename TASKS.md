@@ -386,29 +386,130 @@ colour-theory mats are Phase 5.
       and `single` compositions render correctly — two photos side by
       side with no distortion/cropping, and single images as before
 
-## Phase 5 — Colour & Mat Engine + Faux 3D Framing
+## Phase 5 — Colour & Mat Engine + Faux 3D Framing ✅ complete
 
 *(Milestone 5, §5.3, §5.4)*
 
-- [ ] Implement dominant/representative colour extraction per image and
-      per composition
-- [ ] Implement OKLCH/Lab colour-space utilities (not raw RGB arithmetic)
-- [ ] Implement mat-candidate generation (5–8 candidates: complementary,
+New independent module `api/src/colour/`: `oklch.ts` (OKLCH/OKLab
+conversion + a perceptually-correct multi-colour average), `dominantColour.ts`
+(sharp decode + deterministic k-means clustering in OKLab), `cache.ts`
+(the `AssetColourAnalysis` cache, injected-store design for testability),
+`matCandidates.ts` (8-candidate generation), `matScoring.ts` (auto-select
+scoring), `matMode.ts` (the 11 `MatMode` values, including the three fixed
+neutrals). 50 new unit tests across all six files (76 total in `api/`,
+all passing). Wired into `regenerateQueue`: each composition's images are
+analysed (cache-checked first), combined into one composition-level
+dominant colour, and resolved through the TV's configured `MatMode` into
+the real `background.colour` — replacing Phase 3's flat placeholder.
+`frame` is now `{ shadow: 'subtle', bevel: 'inner' }` (previously
+`'none'/'none'`), and the TV renderer (`tv/src/render/ImageStage.ts`)
+actually draws that: a soft outer shadow + inner-edge highlight per
+photo, plus a faint radial-gradient vignette on the mat itself.
+
+- [x] Implement dominant/representative colour extraction per image and
+      per composition — `colour/dominantColour.ts` (per image, via k-means
+      in OKLab) + `oklch.ts`'s `combineOklch` (per composition: a
+      perceptually-correct Cartesian average across all of a group's
+      images, not just the first one)
+- [x] Implement OKLCH/Lab colour-space utilities (not raw RGB arithmetic)
+      — `colour/oklch.ts`, Björn Ottosson's published conversion
+      matrices, round-trip tested against 8 reference colours
+- [x] Implement mat-candidate generation (5–8 candidates: complementary,
       analogous, muted variants, warm/cool neutral, near-white/near-black)
-- [ ] Implement the mat scoring function (contrast, harmony, luminance,
-      saturation, readability) and auto-selection
-- [ ] Cache colour-analysis results by asset ID/hash — never re-analyse
-      the same image twice (§5.3)
-- [ ] Implement manual override modes (Automatic / Neutral / Warm / Cool
+      — `colour/matCandidates.ts`, always exactly 8, dropping whichever
+      of near-white/near-black would contrast least with the specific
+      photo
+- [x] Implement the mat scoring function (contrast, harmony, luminance,
+      saturation, readability) and auto-selection — `colour/matScoring.ts`;
+      AUTOMATIC mode only, the named override modes below bypass scoring
+      on purpose
+- [x] Cache colour-analysis results by asset ID/hash — never re-analyse
+      the same image twice (§5.3) — new `AssetColourAnalysis` Prisma
+      model + `colour/cache.ts`; **confirmed against the real stack**: a
+      second queue regeneration for the same 49-image album ran in
+      ~0.19s vs ~2s cold, produced byte-identical mat colours, and left
+      the cache table at exactly 49 rows (no re-analysis, no duplicates)
+- [x] Implement manual override modes (Automatic / Neutral / Warm / Cool
       / Dark / Light / Complementary / Analogous + fixed white/black/wood),
-      persisted per TV
-- [ ] Implement faux-3D framing on the TV renderer: subtle inner/outer
+      persisted per TV — `MatMode` enum extended with `WHITE`/`BLACK`/
+      `WOOD` (migration `20260903151743_colour_engine`; these three were
+      in PROJECT.md §5.3 but missing from the Phase 0/2 schema and the
+      config-PUT zod validator); `colour/matMode.ts` resolves all 11.
+      **Verified against a real photo**: all 11 modes produced correct,
+      visually distinct results (e.g. `WOOD` → `#66442c`, a real walnut
+      brown; `WHITE`/`BLACK`/`WOOD` confirmed identical regardless of
+      which photo, per their "fixed" contract)
+- [x] Implement faux-3D framing on the TV renderer: subtle inner/outer
       shadow, inner-edge highlight, faint tonal gradient — kept
-      extremely restrained (§5.4)
-- [ ] Confirm the mat stays stable for the life of a composition (no
-      flicker/recompute mid-display)
-- [ ] Unit tests: colour analysis, candidate generation, mat scoring
-      (§11.1)
+      extremely restrained (§5.4) — `tv/src/render/ImageStage.ts`, driven
+      by the server's `frame` field (the TV still never invents its own
+      styling, §5.1) rather than hardcoded on the TV side
+- [x] Confirm the mat stays stable for the life of a composition (no
+      flicker/recompute mid-display) — no new code needed: mat colour is
+      resolved once at queue-regeneration time and baked into the stored
+      `QueueItem`, same as every other Presentation field: the TV only
+      ever renders what it's given, never recomputes
+- [x] Unit tests: colour analysis, candidate generation, mat scoring
+      (§11.1) — 50 tests: `oklch.test.ts` (round-trips, hue-wrap-safe
+      averaging), `dominantColour.test.ts` (k-means on synthetic points +
+      real sharp-encoded synthetic images, including a "picks the larger
+      of two regions" test and a corrupt-bytes fallback test),
+      `matCandidates.test.ts`, `matScoring.test.ts`, `matMode.test.ts`,
+      `cache.test.ts` (fake in-memory store, no real DB needed)
+
+### Real-data calibration fix (same lesson as Phase 4, applied again)
+
+The first version of the `darker` candidate's lightness floor (0.08)
+looked fine in unit tests but, checked against a real dark photo via the
+live stack, rendered at `#030201` — functionally indistinguishable from
+the fixed `BLACK` mode (`#040302`). OKLCH's lightness scale compresses
+very hard near black (verified directly: L=0.08 and L=0.16 both render
+as near-invisible sRGB deltas). Raised the floor to 0.18 and the min
+chroma from 0.01 to 0.03; re-verified against the same photo — `DARK` now
+renders `#190f03`, clearly a deep tinted brown, clearly distinct from
+`BLACK`. Recorded here rather than only in the code, because it's the
+second time in two phases that an aesthetic threshold only turned out to
+be wrong once checked against a real photo — worth remembering as a
+pattern for Phase 6+ too, not just this one constant.
+
+### Two real rendering bugs found and fixed from a photo of the actual screen
+
+The colour engine and the framing concept were both confirmed correct on
+the first real-hardware pass ("colors and effects look good. Subtle."),
+but a phone photo of the TV caught two layout bugs neither the unit tests
+nor a description could have:
+
+1. **The inner-edge highlight only ever appeared on one side.**
+   `tv/src/render/ImageStage.ts` used `inset 0 1px 0 rgba(255,255,255,0.07)`
+   for the bevel highlight — an *offset* inset shadow, which CSS only ever
+   paints along one edge (the one the offset points away from), not a
+   perimeter. Fixed by switching to `inset 0 0 0 1px` (zero offset, 1px
+   spread instead) — a spread-only inset shadow paints evenly on all four
+   sides.
+2. **Some photos had no mat margin at all on two sides.** Even after fix
+   #1, a real height-constrained photo (contain-fit maxed out on height,
+   touching the screen's top and bottom edges exactly) still showed no
+   visible border top/bottom — there was no mat pixel there for a
+   highlight to render against in the first place. Contain-fit had been
+   sizing each photo against its *slot's* full bounds with zero reserved
+   margin, so a photo whose aspect ratio happened to match its slot on one
+   axis would touch that slot's edge on that axis, mat or no mat. Real
+   picture matting doesn't work that way — the mat opening is a fixed
+   margin cut on every side, independent of the print's own proportions.
+   Fixed by giving every slot a uniform `2.5vmin` padding (viewport-
+   relative, not slot-relative, so a two/three-portrait composition's
+   individual photos get the same real-pixel margin as a full-screen
+   single) before contain-fit runs, and dropping the separate inter-slot
+   `gap` now that per-slot padding already provides it.
+
+Both fixes rebuilt, redeployed to the real TV, and **confirmed by the
+user from the physical screen**: bevel visible on all four sides, mat
+margin consistently present regardless of a photo's own aspect ratio.
+Worth remembering generally: a layout/CSS effect being "correct in
+concept" and "visible in the unit tests' intent" doesn't mean it's
+correct in practice — this needed an actual photo of the actual screen to
+catch, the same way Phases 4-5's colour thresholds needed real EXIF/real
+photos to catch.
 
 ## Phase 6 — Memories Web Dashboard
 

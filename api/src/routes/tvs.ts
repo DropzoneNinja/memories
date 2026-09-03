@@ -19,7 +19,19 @@ const configBodySchema = z.object({
   intervalSeconds: z.number().int().positive().optional(),
   playbackMode: z.enum(['SEQUENTIAL', 'SHUFFLE']).optional(),
   matMode: z
-    .enum(['AUTOMATIC', 'NEUTRAL', 'WARM', 'COOL', 'DARK', 'LIGHT', 'COMPLEMENTARY', 'ANALOGOUS'])
+    .enum([
+      'AUTOMATIC',
+      'NEUTRAL',
+      'WARM',
+      'COOL',
+      'DARK',
+      'LIGHT',
+      'COMPLEMENTARY',
+      'ANALOGOUS',
+      'WHITE',
+      'BLACK',
+      'WOOD',
+    ])
     .optional(),
   disconnectedBehavior: z.enum(['CONTINUE_QUEUE', 'REPEAT_QUEUE', 'FREEZE']).optional(),
   cacheSize: z.number().int().positive().optional(),

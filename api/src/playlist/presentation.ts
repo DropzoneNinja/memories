@@ -2,10 +2,6 @@ import { randomUUID } from 'node:crypto';
 import type { ImmichAsset } from '../immich/types.js';
 import type { CompositionGroup, LayoutType, SlotPosition } from '../composition/group.js';
 
-// Colour-theory mat generation is Phase 5 — this is still the simplest
-// valid mat/frame/transition (PROJECT.md §5.1), just now driven by a real
-// multi-slot composition (Phase 4) instead of one image at a time.
-const PLACEHOLDER_MAT_COLOUR = '#141414';
 const CROSSFADE_SECONDS = 2;
 
 export interface PresentationSlot {
@@ -36,7 +32,10 @@ export interface Presentation {
   duration: number;
   layout: { type: LayoutType; slots: PresentationSlot[] };
   background: { type: 'mat'; colour: string };
-  frame: { shadow: 'none'; bevel: 'none' };
+  // Faux-3D framing (Phase 5, §5.4) — the TV renders these as a subtle
+  // shadow under each photo and a faint inner-edge highlight. Always
+  // 'subtle'/'inner' in v1; there's no spec'd reason yet to vary them.
+  frame: { shadow: 'subtle'; bevel: 'inner' };
   transition: { type: 'crossfade'; duration: number };
   assets: PresentationAsset[];
 }
@@ -70,6 +69,7 @@ export function buildPresentation(
   group: CompositionGroup,
   albumName: string,
   durationSeconds: number,
+  matColourHex: string,
 ): Presentation {
   return {
     presentationId: randomUUID(),
@@ -78,8 +78,8 @@ export function buildPresentation(
       type: group.layoutType,
       slots: group.slots.map((slot) => ({ assetId: slot.asset.id, position: slot.position })),
     },
-    background: { type: 'mat', colour: PLACEHOLDER_MAT_COLOUR },
-    frame: { shadow: 'none', bevel: 'none' },
+    background: { type: 'mat', colour: matColourHex },
+    frame: { shadow: 'subtle', bevel: 'inner' },
     transition: { type: 'crossfade', duration: CROSSFADE_SECONDS },
     assets: group.slots.map((slot) => buildPresentationAsset(slot.asset, albumName)),
   };
