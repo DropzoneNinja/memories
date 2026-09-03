@@ -59,8 +59,12 @@ function buildPresentationAsset(asset: ImmichAsset, albumName: string): Presenta
       fNumber: exif?.fNumber ?? null,
       iso: exif?.iso ?? null,
       focalLength: exif?.focalLength ?? null,
-      // No GPS/location fields — PROJECT.md §12 defaults that to
-      // never-surfaced, anywhere.
+      // No GPS/location fields, deliberately: this metadata object is
+      // stored on the QueueItem and served to the TV via /playlist, and
+      // the TV must never receive location data at all (§5.7, §13),
+      // unlike the rest of this metadata. The dashboard's location map
+      // (Phase 6) fetches GPS separately and on-demand instead — see
+      // routes/albums.ts's GET /assets/:id/location.
     },
   };
 }

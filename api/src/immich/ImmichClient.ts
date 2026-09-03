@@ -47,6 +47,16 @@ export class ImmichClient {
     return (await res.json()) as ImmichAlbum;
   }
 
+  // Single-asset lookup — used only for the dashboard's on-demand
+  // location map (Phase 6), not the TV/playlist pipeline (which already
+  // has EXIF in bulk from listAlbumAssets). Verified against the real
+  // instance: `GET /assets/{id}` returns the same exifInfo shape,
+  // including latitude/longitude/city/state/country.
+  async getAsset(assetId: string): Promise<ImmichAsset> {
+    const res = await this.request(`/assets/${assetId}`);
+    return (await res.json()) as ImmichAsset;
+  }
+
   // NOTE: `/search/metadata` with `albumIds` was marked deprecated in the
   // Immich API as of v3.2.0 in favour of the columnar `/timeline/bucket`
   // endpoint — but that endpoint returns struct-of-arrays data designed

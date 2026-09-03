@@ -621,6 +621,41 @@ exists), but it actively hid the real cause of bug #2 above during
 testing. Narrowed to only show that message for an actual 401; anything
 else now says the API couldn't be reached.
 
+### Addendum: location map (user-requested after Phase 6 landed)
+
+PROJECT.md §12 originally defaulted GPS/location EXIF to "never surfaced,
+anywhere." Revisited on request: a map now sits to the right of the
+featured photo in the detail pane, showing where it was taken.
+
+- [x] `GET /assets/:id/location` (new, `requireAuth`) — fetches a single
+      asset fresh from Immich (`ImmichClient.getAsset`, verified against
+      the real instance: real field names are `latitude`/`longitude`/
+      `city`/`state`/`country`) and returns just those five fields.
+      Deliberately its own endpoint, not added to Presentation/QueueItem
+      — the TV must never receive GPS at all, not just never render it,
+      so this stays completely outside the `regenerateQueue`/`/playlist`
+      pipeline. **Confirmed** by inspecting a real `/playlist` response
+      after this shipped: no latitude/longitude/city anywhere in it.
+- [x] `LocationMap.tsx` — plain Leaflet (not react-leaflet) + free CARTO
+      dark tiles, no API key. A `circleMarker` instead of Leaflet's
+      default pin, sidestepping the well-known bundler/default-marker-
+      icon-path issue entirely rather than working around it.
+- [x] `TvDetailPane.tsx` restructured around one "featured photo" concept
+      (photo + EXIF + map together) instead of two separate EXIF blocks —
+      simpler, and it's what the requested interaction actually needed:
+      clicking a "next" thumbnail features that photo (photo/EXIF/map all
+      update together); clicking the featured photo itself resets back to
+      whatever the TV is currently displaying. Location is fetched
+      on-demand per focused asset id, cancelling/ignoring stale
+      in-flight requests if the user clicks again before one resolves.
+- [x] Verified through the real docker-built dashboard (not the dev
+      server) against the real physical TV and real EXIF: map renders
+      with live tiles, clicking a next-photo moves the marker to that
+      photo's real coordinates, clicking the featured photo resets it —
+      confirmed with precise lat/long pulled directly from two different
+      real assets (~2.7km apart, different suburbs), not just eyeballing
+      the screenshot.
+
 ## Phase 7 — Resilience
 
 *(Milestone 7, §5.8, §5.10)*

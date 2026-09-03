@@ -287,7 +287,7 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  max-width: 720px;
+  max-width: 980px;
 }
 
 .tv-header {
@@ -300,10 +300,11 @@ h3 {
   display: flex;
   gap: 20px;
   align-items: flex-start;
+  flex-wrap: wrap;
 }
 
 .current-image-frame {
-  width: 360px;
+  width: 320px;
   height: 220px;
   border-radius: 4px;
   display: flex;
@@ -312,6 +313,13 @@ h3 {
   overflow: hidden;
   flex-shrink: 0;
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  /* Reset button defaults — this is a <button>, not a <div>, so the
+     photo itself is clickable (resets the featured photo back to
+     "currently displaying"). */
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
 }
 
 .current-image-frame img {
@@ -327,12 +335,60 @@ h3 {
   gap: 4px;
   font-size: 13px;
   color: var(--text-dim);
+  min-width: 200px;
+  flex: 1 1 200px;
 }
 
 .exif .filename {
   color: var(--text);
   font-size: 14px;
   font-weight: 600;
+}
+
+.location-map {
+  width: 280px;
+  height: 220px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+}
+
+.location-map-canvas {
+  width: 100%;
+  height: 100%;
+  background: var(--panel-alt);
+}
+
+.location-map-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 13px;
+  pointer-events: none;
+  background: var(--panel-alt);
+}
+
+.location-map-label {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 3px 8px;
+  background: rgba(20, 20, 24, 0.75);
+  color: var(--text);
+  font-size: 12px;
+  border-radius: 4px;
+  pointer-events: none;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  z-index: 1000;
 }
 
 .transport-controls {

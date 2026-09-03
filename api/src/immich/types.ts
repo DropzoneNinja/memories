@@ -31,6 +31,16 @@ export interface ImmichExif {
   // fields are the only reliable source of pixel dimensions.
   exifImageWidth: number | null;
   exifImageHeight: number | null;
+  // GPS/location (verified field names against the real instance, Phase
+  // 6). PROJECT.md §12 originally defaulted this to "never surfaced,
+  // anywhere" — revisited for the dashboard's location map; still never
+  // sent to the TV (see routes/albums.ts's location endpoint and
+  // playlist/presentation.ts's comment on why it's excluded there).
+  latitude: number | null;
+  longitude: number | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
 }
 
 export interface ImmichAsset {

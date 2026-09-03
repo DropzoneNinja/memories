@@ -38,4 +38,31 @@ export async function albumRoutes(app: FastifyInstance): Promise<void> {
       return reply.send(Buffer.from(body));
     },
   );
+
+  // Dashboard-only location lookup (Phase 6, revisiting PROJECT.md §12's
+  // "GPS never surfaced anywhere" default now that the dashboard wants a
+  // location map). Deliberately a separate on-demand endpoint rather than
+  // added to the Presentation/QueueItem the TV consumes — the TV must
+  // never receive GPS data at all, not just never render it (§5.7, §13).
+  // Fetched fresh per asset rather than cached/stored: called rarely
+  // (only for whichever photo the dashboard has focused), no need for
+  // the colour-engine-style persistent cache.
+  app.get<{ Params: { id: string } }>(
+    '/api/v1/assets/:id/location',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const immich = getImmichClient();
+      const asset = await immich.getAsset(request.params.id).catch(() => null);
+      if (!asset) return reply.code(404).send({ error: 'Asset not found' });
+
+      const exif = asset.exifInfo;
+      return {
+        latitude: exif?.latitude ?? null,
+        longitude: exif?.longitude ?? null,
+        city: exif?.city ?? null,
+        state: exif?.state ?? null,
+        country: exif?.country ?? null,
+      };
+    },
+  );
 }

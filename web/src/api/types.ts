@@ -103,6 +103,17 @@ export interface AlbumSummary {
   assetCount: number;
 }
 
+// GPS EXIF (PROJECT.md §12, revisited for the dashboard's location map)
+// — fetched on demand per asset, never part of Presentation/TvDetail
+// (the TV must never receive this, see api/src/playlist/presentation.ts).
+export interface AssetLocation {
+  latitude: number | null;
+  longitude: number | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+}
+
 export interface ConfigInput {
   albumIds?: string[];
   intervalSeconds?: number;

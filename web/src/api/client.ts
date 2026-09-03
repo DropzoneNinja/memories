@@ -3,6 +3,7 @@
 // every request except login itself.
 import type {
   AlbumSummary,
+  AssetLocation,
   CommandType,
   Configuration,
   ConfigInput,
@@ -79,6 +80,7 @@ export const api = {
     request(`/api/v1/tvs/${id}/commands`, { method: 'POST', body: JSON.stringify({ type }) }),
 
   listAlbums: () => request<AlbumSummary[]>('/api/v1/albums'),
+  getAssetLocation: (assetId: string) => request<AssetLocation>(`/api/v1/assets/${assetId}/location`),
 
   // Presentation asset URLs are server-relative (§6) — resolve against
   // the same API base, same pattern as the TV's own resolveAssetUrl.

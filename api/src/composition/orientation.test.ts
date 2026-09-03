@@ -23,6 +23,11 @@ function asset(width: number | null, height: number | null, orientation: string 
             orientation,
             exifImageWidth: width,
             exifImageHeight: height,
+            latitude: null,
+            longitude: null,
+            city: null,
+            state: null,
+            country: null,
           },
   };
 }

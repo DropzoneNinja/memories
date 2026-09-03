@@ -794,9 +794,14 @@ on them — revisit if any of these don't fit:
 - **Permission granularity**: defaulting to a single admin-capable user
   model for now (add roles later if a second household user needs
   restricted access) rather than building roles up front.
-- **GPS/location EXIF**: defaulting to *never surfaced*, anywhere,
-  consistent with the "dashboard shows rich metadata, TV shows none"
-  split in §5.7 — the more conservative/privacy-respecting choice.
+- **GPS/location EXIF**: originally defaulted to *never surfaced*,
+  anywhere — **revisited in Phase 6**, which added a location map to the
+  dashboard's per-TV detail pane (§4.2). The "TV shows none" half of that
+  split still holds absolutely: GPS is fetched by Memories Web only, via
+  its own on-demand `GET /assets/:id/location` call, and is never part of
+  the Presentation/QueueItem data the TV receives (confirmed by
+  inspecting a real `/playlist` response — no latitude/longitude/city
+  anywhere in it). Only the "surfaced in the dashboard" half changed.
 - **TV-side cache storage cap**: defaulting to a ~200MB soft ceiling with
   LRU eviction, on top of the item-count default (5–10 presentations,
   §5.8).

@@ -20,6 +20,11 @@ function asset(id: string, width: number, height: number, orientation = '1'): Im
       orientation,
       exifImageWidth: width,
       exifImageHeight: height,
+      latitude: null,
+      longitude: null,
+      city: null,
+      state: null,
+      country: null,
     },
   };
 }
