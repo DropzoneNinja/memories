@@ -636,10 +636,28 @@ featured photo in the detail pane, showing where it was taken.
       so this stays completely outside the `regenerateQueue`/`/playlist`
       pipeline. **Confirmed** by inspecting a real `/playlist` response
       after this shipped: no latitude/longitude/city anywhere in it.
-- [x] `LocationMap.tsx` — plain Leaflet (not react-leaflet) + free CARTO
-      dark tiles, no API key. A `circleMarker` instead of Leaflet's
-      default pin, sidestepping the well-known bundler/default-marker-
-      icon-path issue entirely rather than working around it.
+- [x] `LocationMap.tsx` — plain Leaflet (not react-leaflet), standard
+      OpenStreetMap tiles, no API key. A `circleMarker` instead of
+      Leaflet's default pin, sidestepping the well-known bundler/default-
+      marker-icon-path issue entirely rather than working around it.
+      **First version used CARTO's free dark-tile URL instead of plain
+      OSM** — visually nicer (actually dark, not just inverted), but the
+      user spotted a real problem from an actual screenshot that my own
+      "did the tile request return 200" check completely missed: CARTO's
+      anonymous dark-tile endpoint now requires an API key, and instead
+      of erroring it serves a *watermarked "API key required" placeholder
+      image* with a 200 status — indistinguishable from a real tile at
+      the network level. Switched to `tile.openstreetmap.org` (the
+      canonical, genuinely-free-forever OSM tile server) and got the dark
+      look back via a CSS `invert()`/`hue-rotate()` filter on the tile
+      layer instead — doesn't depend on any single provider's free tier
+      surviving. Hit a second, smaller bug getting the filter applied:
+      Leaflet's `tileLayer({ className })` option lands on the layer's
+      wrapping `<div class="leaflet-layer">`, not on each tile `<img>` —
+      confirmed by inspecting the real rendered DOM, not guessed. Both
+      fixes rebuilt, redeployed, and reconfirmed by actually looking at a
+      screenshot of the rendered tiles (not just "the network request
+      succeeded") before calling it done.
 - [x] `TvDetailPane.tsx` restructured around one "featured photo" concept
       (photo + EXIF + map together) instead of two separate EXIF blocks —
       simpler, and it's what the requested interaction actually needed:

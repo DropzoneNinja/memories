@@ -362,6 +362,19 @@ h3 {
   background: var(--panel-alt);
 }
 
+/* Standard OSM tiles are bright/white by default — inverting + hue-
+   rotating them gives a dark map without depending on any particular
+   provider's dark-tile offering staying free (CARTO's did not, see
+   LocationMap.tsx). Leaflet's tileLayer `className` option lands on the
+   layer's wrapping <div class="leaflet-layer dark-tiles">, not on each
+   individual tile <img> (checked directly against the rendered DOM) —
+   so this targets that div, whose filter cascades to its tile images.
+   It's a sibling of the marker pane, not an ancestor of it, so the
+   accent-coloured marker is unaffected. */
+.location-map-canvas .leaflet-layer.dark-tiles {
+  filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9);
+}
+
 .location-map-empty {
   position: absolute;
   inset: 0;

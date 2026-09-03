@@ -3,10 +3,16 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
 const ZOOM = 13;
-// A dark basemap to match the dashboard's own theme, rather than
-// Leaflet's default bright OSM tiles. Public, no API key.
-const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-const TILE_ATTRIBUTION = '&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors';
+// Standard OpenStreetMap tiles — genuinely free, no API key, no account.
+// A CARTO dark-tile URL was tried first (visually matched the theme
+// better) but turned out to now require an API key: it still returned
+// HTTP 200, just serving a watermarked "API key required" placeholder
+// image instead of an error — invisible to a network-status check, only
+// caught by actually looking at a screenshot. Dark styling is applied as
+// a CSS filter on the tile layer instead (see styles.css), which doesn't
+// depend on any provider's free-tier tiles staying free.
+const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const TILE_ATTRIBUTION = '&copy; OpenStreetMap contributors';
 
 interface Props {
   latitude: number | null;
@@ -34,7 +40,7 @@ export function LocationMap({ latitude, longitude, label, loading }: Props) {
       zoomControl: false,
       attributionControl: true,
     }).setView([0, 0], 1);
-    L.tileLayer(TILE_URL, { attribution: TILE_ATTRIBUTION, maxZoom: 18 }).addTo(map);
+    L.tileLayer(TILE_URL, { attribution: TILE_ATTRIBUTION, maxZoom: 19, className: 'dark-tiles' }).addTo(map);
     mapRef.current = map;
 
     return () => {
