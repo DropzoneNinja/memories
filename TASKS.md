@@ -386,6 +386,55 @@ colour-theory mats are Phase 5.
       and `single` compositions render correctly — two photos side by
       side with no distortion/cropping, and single images as before
 
+### Addendum: never show a lone portrait (user-reported, post-launch)
+
+User caught it from actually watching the real slideshow: "a couple of
+single portrait images" were showing up alone. The original design
+(PROJECT.md §5.2, pre-correction) had *two* independent sources of a
+lone-portrait composition, both considered intentional at the time:
+`preferredGroupSize`'s `ratio > 0.85 → 1` branch (a wide/near-square
+portrait "looks better alone" than squeezed into a half-width slot), and
+an uneven run remainder (e.g. 5 narrow portraits packing greedily as
+2+2+1). The user's correction overrides both: a lone portrait is now
+**never** an acceptable composition, full stop.
+
+- [x] `preferredGroupSize` (`api/src/composition/group.ts`) floored at
+      2 — the `→ 1` branch is gone entirely, so no aspect ratio ever
+      classifies a portrait as "better alone"
+- [x] `packPortraitRun` reworked: computes a run's group sizes up front,
+      then if the trailing size is 1 (only possible now as a genuine
+      remainder, e.g. 3+1 or 2+2+1), folds it into the previous group
+      (2→3) when there's room, or reflows (3+1 → 2+2) when the previous
+      group is already full — a dangling remainder is never emitted as
+      its own group
+- [x] `groupForComposition` handles the case `packPortraitRun` can't fix
+      on its own: a portrait run of length exactly 1 (no neighbouring
+      portrait at all, e.g. sandwiched between two landscapes). Never
+      shown alone: merged with the next image if one exists (keeps
+      chronological order forward), else grown into the immediately
+      preceding group (up to the 3-up cap) if there's room. Only a
+      single-image album (literally nothing else to pair with) still
+      shows one photo alone — unavoidable, same as it always was
+      regardless of orientation
+- [x] 10 new/rewritten unit tests in `group.test.ts` covering: both
+      remainder-reflow shapes, wide-portraits-paired (not alone), forward
+      merge (isolated portrait at album start), backward merge (isolated
+      portrait at album end), two consecutive isolated portraits both
+      getting absorbed (none stranded), the true single-image-album
+      fallback, and a general "no composition in a realistic mixed album
+      is ever a lone portrait" property test — 86/86 tests passing
+- [x] **Verified against the real stack**: rebuilt/redeployed the API
+      container, re-saved the live "Lounge" TV's config unchanged (just to
+      trigger `regenerateQueue` against the fixed engine), then
+      cross-checked the regenerated queue against the real album's own
+      EXIF (fetched independently via `GET /albums/:id/assets`, orientation
+      computed the same way `classifyOrientation` does) rather than trusting
+      layout labels alone. Real 100-photo album, 28 composed slides (12
+      `single`, 2 `two-portrait`, 14 `collage` at the user's chosen
+      `collageFrequency: 2`): zero lone-portrait violations — every
+      `single` composition's photo confirmed landscape by its real EXIF
+      dimensions, every portrait appears only inside a 2+ composition
+
 ## Phase 5 — Colour & Mat Engine + Faux 3D Framing ✅ complete
 
 *(Milestone 5, §5.3, §5.4)*
@@ -733,24 +782,107 @@ clean them up.
       `QueueItem` rows, and the unrelated `AssetColourAnalysis` cache
       (keyed by Immich asset id, not TV) untouched at 49 rows
 
-## Phase 7 — Resilience
+## Phase 7 — Resilience ✅ complete
 
 *(Milestone 7, §5.8, §5.10)*
 
-- [ ] Implement the TV rolling cache: default 5–10 presentations
-      (configurable), ~200MB soft ceiling, LRU eviction (§5.8, §12)
-- [ ] Implement TV logic to request more queue items as the cache is
-      consumed
-- [ ] Implement configurable disconnected-behaviour policies: continue
-      cached queue, repeat cached queue, freeze on current image, retry
-      interval (§5.10)
-- [ ] Implement config versioning + push: WebSocket/SSE from API to TV,
-      with polling as a guaranteed fallback (§5.10)
-- [ ] Implement graceful reconnect/backoff on both TV and API sides (§9.4)
-- [ ] Verify: disconnect the TV from the API → slideshow continues from
-      cache; reconnect → catches up cleanly with no visible hiccup
-- [ ] Verify: change album/config in the dashboard while a TV is offline
-      → it picks up the new playlist once reconnected
+Two fields (`Configuration.cacheSize`, `Configuration.disconnectedBehavior`)
+had existed in the schema/zod validator/PUT handler since Phase 0/2 but were
+never actually consumed anywhere — this phase is what finally reads and
+acts on them. `@fastify/websocket ^10.0.0` was also already an installed,
+Fastify-4-compatible dependency, pre-staged but never registered — a strong
+signal this was the intended push mechanism, so no WebSocket-vs-SSE
+decision was needed.
+
+- [x] TV rolling cache — `tv/src/cache/ImageCache.ts`: an in-memory
+      `Map<url, {objectUrl, size, lastUsed}>` built from `fetch().blob()` +
+      `URL.createObjectURL`, LRU-evicted against a ~200MB soft ceiling.
+      Deliberately *not* a Tizen-specific storage API or the browser Cache
+      Storage API — `TizenAdapter.ts` exposes no filesystem/storage surface
+      today, and either option would need a new, unverified Tizen manifest
+      privilege; plain Blobs need none and work identically in the
+      browser-dev fallback. `Configuration.cacheSize` (presentation count,
+      already schema-configurable, default 8) is now dashboard-exposed
+      (`web/src/components/ConfigForm.tsx`) and TV-honored —
+      `PlaybackController` bounds the queue to `cacheSize` upcoming items
+      and trims consumed items down to a 1-item back-buffer (just enough
+      for one Previous press), evicting the image cache to match on every
+      trim
+- [x] TV request-more logic — unchanged trigger condition
+      (`REFILL_THRESHOLD`), but now also capped by remaining `cacheSize`
+      room and paired with prefetching: `PlaybackController.fetchMore()`
+      kicks off `ImageCache.prefetch()` for newly-fetched items in the
+      background, so images are typically already cached by the time
+      they're actually shown
+- [x] Disconnected-behaviour policies (`PlaybackController`) — 2
+      consecutive failed heartbeat/playlist-fetch attempts (shared
+      failure/success counters) mark the TV offline. **User-clarified
+      scope**: `CONTINUE_QUEUE` and `REPEAT_QUEUE` get no behavioral
+      distinction — the spec names them almost identically and gives no
+      real hook to differentiate — both just loop the full cached queue
+      indefinitely once exhausted (`next()` wraps to index 0 instead of
+      stalling). `FREEZE` clears the advance timer via a separate
+      `autoFrozen` flag (distinct from the viewer's own `paused`), so a
+      manual pause always survives a reconnect untouched, and unfreezing
+      restarts the timer via a new `PresentationRenderer.restartTimer()`
+      rather than a full re-render — no visible re-fade on reconnect. The
+      "retry every N minutes in the background regardless of mode"
+      requirement is satisfied by the existing 30s heartbeat interval,
+      which never stops firing
+- [x] Config versioning + push — `api/src/realtime/hub.ts` (new,
+      in-process `Map<deviceId, Set<WebSocket>>`, no external pub-sub
+      needed for a single-instance household deployment) backs a new
+      device-facing `GET /tvs/:deviceId/ws` route
+      (`{ websocket: true }` via `@fastify/websocket`); the admin PUT
+      `.../config` handler broadcasts `{type:'config-changed', configurationVersion}`
+      to it after `regenerateQueue`. The **guaranteed polling fallback**
+      isn't a new timer — it's the TV's existing 30s heartbeat, whose
+      response (`POST /heartbeat`) now also carries
+      `configurationVersion`/`cacheSize`/`disconnectedBehavior`, so
+      correctness never depends on the WebSocket staying connected.
+      `tv/src/realtime/ConfigSocket.ts` wraps the client side: reconnects
+      with backoff, and is a safe no-op (feature-detected) if `WebSocket`
+      isn't available on this Tizen firmware. Either path calls
+      `PlaybackController.applyConfigVersion`, which discards not-yet-shown
+      stale queue items and eagerly refetches — the currently-displayed
+      item is never touched, so a save takes effect within seconds instead
+      of however long the old reactive-refill-only design happened to take
+      (this is the exact bug the user hit earlier: "pressed save, still
+      playing the old selection")
+- [x] Graceful reconnect/backoff — `tv/src/net/backoff.ts` (new, shared
+      exponential backoff, also replacing `PlaybackController.start()`'s
+      old two hardcoded retry constants with one implementation), used by
+      `ConfigSocket`'s reconnect. API-side: `ImmichClient.request()` now
+      retries a network error or 5xx up to 3 attempts (500ms/1500ms
+      delays) — never a 4xx — so a transient Immich blip no longer fails a
+      whole config save
+- [x] First test runner for `tv/` — `tsx --test`, mirroring `api/`'s setup
+      (PROJECT.md §11.1 explicitly names "cache eviction" as something
+      needing unit tests; there was nowhere to put one before this).
+      24 new tests across `ImageCache`, `backoff`, `ConfigSocket`, and
+      `PlaybackController` (loop-vs-stall per policy, freeze/resume vs.
+      manual pause, config-version-triggered refetch, cache-size bounding)
+- [x] **Verified against the real stack, not just unit tests**: rebuilt
+      the API container; connected a raw `ws` client to the real
+      `/tvs/:deviceId/ws` endpoint and confirmed a real config save
+      delivered `{"type":"config-changed","configurationVersion":7}`
+      immediately; confirmed the real `/heartbeat` response now carries
+      the three new fields. Redeployed the Phase 7 build to the physical
+      TV (`npm run deploy 10.10.10.80` — uninstalls/re-pairs, per known
+      behaviour since Phase 3; re-paired and restored its config)
+- [x] **Verify (real hardware): disconnect → continues from cache, reconnect
+      → catches up cleanly** — `docker stop memories-api-1` for 90s (three
+      missed heartbeats) while the real paired TV kept running. No crash;
+      `lastSeenAt` resumed updating within one heartbeat interval of
+      `docker start`, with no re-pairing needed this time (unlike a
+      redeploy, a plain API outage doesn't touch the TV's `localStorage`)
+- [x] **Verify (real hardware): config change while offline → picked up on
+      reconnect** — pushed a real config change
+      (`intervalSeconds: 20 -> 15`) the moment the API came back up;
+      confirmed via Postgres that the TV's `currentPresentationId` moved to
+      a `QueueItem` from the newly regenerated queue (`durationSeconds: 15`)
+      shortly after, then reverted the interval back to 20 afterward so the
+      live TV was left exactly as found
 
 ## Phase 8 — Hardening & Acceptance
 

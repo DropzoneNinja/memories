@@ -146,6 +146,11 @@ model Configuration {
   matMode              MatMode              @default(AUTOMATIC)
   disconnectedBehavior DisconnectedBehavior @default(CONTINUE_QUEUE)
   cacheSize            Int                  @default(8)
+  // Collage layout (§5.2 addendum): every `collageFrequency`th composition
+  // is a grid of up to `maxCollageImages` photos (any orientation) instead
+  // of the normal single/portrait-group layout. 0 = disabled.
+  maxCollageImages     Int                  @default(6)
+  collageFrequency     Int                  @default(0)
   createdAt            DateTime             @default(now())
 
   @@unique([tvId, version])

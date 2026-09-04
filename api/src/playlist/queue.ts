@@ -69,12 +69,16 @@ export async function regenerateQueue(tvId: string, config: Configuration): Prom
 
   // Composition engine (PROJECT.md §5.2, Phase 4): groups the ordered
   // images into displayable compositions (single landscape, 2/3-up
-  // portrait groups) before turning each group into a QueueItem — one row
-  // per *composition*, not per image, so a 3-portrait group is one
-  // QueueItem the TV displays for one `intervalSeconds` interval, not
-  // three. Runs on `ordered` so grouping is deterministic for a given
-  // shuffle/sequential order, per the same seed as the shuffle itself.
-  const groups = groupForComposition(ordered);
+  // portrait groups, plus optional collages) before turning each group into
+  // a QueueItem — one row per *composition*, not per image, so a
+  // 3-portrait group (or a collage) is one QueueItem the TV displays for
+  // one `intervalSeconds` interval, not several. Runs on `ordered` so
+  // grouping is deterministic for a given shuffle/sequential order, per the
+  // same seed as the shuffle itself.
+  const groups = groupForComposition(ordered, {
+    maxCollageImages: config.maxCollageImages,
+    collageFrequency: config.collageFrequency,
+  });
 
   // Colour/mat engine (PROJECT.md §5.3, Phase 5): one mat colour per
   // composition, derived from all its images' dominant colours combined

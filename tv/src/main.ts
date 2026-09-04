@@ -4,6 +4,7 @@ import { getOrCreateDeviceId } from './device/DeviceId';
 import { MemoriesApiClient } from './api/MemoriesApiClient';
 import { PairingScreen } from './pairing/PairingScreen';
 import { PlaybackController } from './playback/PlaybackController';
+import { ConfigSocket, wsUrlFor } from './realtime/ConfigSocket';
 import type { RemoteCommand } from './api/types';
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -21,32 +22,12 @@ console.log(`Device ${deviceId} — screen ${screenSize.width}x${screenSize.heig
 const remote = new TizenAdapter();
 remote.init();
 
-// Temporary dev-only readout (Phase 1/3) — remove before Phase 8
-// hardening (PROJECT.md §5.7: no persistent chrome in the finished app).
-const debugLabel = document.createElement('div');
-Object.assign(debugLabel.style, {
-  position: 'absolute',
-  left: '24px',
-  bottom: '24px',
-  color: 'rgba(255,255,255,0.65)',
-  fontFamily: 'sans-serif',
-  fontSize: '18px',
-  textShadow: '0 1px 4px rgba(0,0,0,0.8)',
-  zIndex: '10',
-});
-stage.appendChild(debugLabel);
-
-function setDebug(text: string): void {
-  debugLabel.textContent = `${screenSize.width}x${screenSize.height} · ${deviceId.slice(0, 8)}… · ${text}`;
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function waitForPairing(): Promise<void> {
   const pairingScreen = new PairingScreen(stage);
-  setDebug('pairing…');
 
   for (;;) {
     try {
@@ -86,7 +67,6 @@ async function main(): Promise<void> {
   await waitForPairing();
 
   const controller = new PlaybackController(api, deviceId, stage);
-  controller.setOnStatusChange(setDebug);
   await controller.start();
 
   remote.onKey((key: RemoteKey) => {
@@ -108,7 +88,24 @@ async function main(): Promise<void> {
     }
   });
 
-  setInterval(() => api.sendHeartbeat(deviceId, controller.currentStatus ?? undefined), HEARTBEAT_INTERVAL_MS);
+  // Push channel (Phase 7, PROJECT.md §5.10) — near-instant notification of
+  // a config change. Purely an optimization: the heartbeat below is the
+  // guaranteed fallback, so a Tizen firmware without WebSocket support (or
+  // a socket that just can't stay connected) still catches up within one
+  // heartbeat interval.
+  const configSocket = new ConfigSocket({
+    url: wsUrlFor(apiBaseUrl, deviceId),
+    onConfigChanged: (version) => controller.onPushedConfigChanged(version),
+  });
+  configSocket.connect();
+
+  // The heartbeat response is the guaranteed way of learning about a
+  // config change (and, by succeeding at all, "we're reconnected") — see
+  // PlaybackController.applyServerStatus.
+  setInterval(async () => {
+    const status = await api.sendHeartbeat(deviceId, controller.currentStatus ?? undefined);
+    controller.applyServerStatus(status);
+  }, HEARTBEAT_INTERVAL_MS);
 
   setInterval(async () => {
     const commands = await api.pollCommands(deviceId);

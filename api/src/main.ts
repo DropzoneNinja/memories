@@ -1,6 +1,7 @@
 import "dotenv/config";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import websocket from "@fastify/websocket";
 import { prisma } from "./db.js";
 import { albumRoutes } from "./routes/albums.js";
 import { tvRoutes } from "./routes/tvs.js";
@@ -20,6 +21,13 @@ const app = Fastify({ logger: true });
 // burden (dev server vs. Docker vs. whatever LAN IP a phone/laptop uses)
 // for no real security benefit here.
 await app.register(cors, { origin: true });
+
+// Push channel for TV config-change notifications (PROJECT.md §5.10,
+// Phase 7) — realtime/hub.ts tracks subscribers, tvRoutes registers the
+// actual `/tvs/:deviceId/ws` endpoint. Purely an optimization: the TV's
+// heartbeat response is the guaranteed polling fallback, so a TV that
+// can't hold a WebSocket open still catches up within one heartbeat.
+await app.register(websocket);
 
 // Smoke-test route for Phase 0 — confirms the API boots and can reach
 // Postgres. Real TV/dashboard routes land in Phases 2-6.

@@ -218,9 +218,11 @@ aspect ratios and picks a layout:
   appropriate mat if needed.
 - **Less-wide landscape** → shown fully inside the available area with a
   mat/border.
-- **Portrait** → 1, 2, or 3 up depending on aspect ratio and available
-  space. A single very tall portrait can stand alone; two or three
-  compatible portraits can be grouped side-by-side.
+- **Portrait** → 2 or 3 up depending on aspect ratio and available space.
+  A lone portrait is never shown by itself — it leaves the screen looking
+  half-empty — so an unpaired portrait is always merged with a
+  neighbouring image (another portrait, or a landscape) instead (revised
+  after launch; see the Phase 4 implementation note below).
 - **Never force a landscape into a portrait slot** just to fill a layout.
 - **Mixed-orientation albums** are grouped intelligently — e.g. a
   landscape shown alone, followed by a pair of portraits — rather than
@@ -236,10 +238,11 @@ awkward whitespace.
 
 Edge cases the engine must handle explicitly: all-landscape albums,
 all-portrait albums, mixed albums, square images, panoramic and extremely
-wide/tall images, very small images, an album of exactly one image (show
-it alone), and a "remainder" of one, two, or three portraits at the end of
-a grouping pass (don't force an extra image in just to complete a group;
-one remaining portrait is shown alone with a beautiful mat).
+wide/tall images, very small images, and an album of exactly one image
+(show it alone — the only case where a single photo alone is unavoidable,
+since nothing else exists to pair it with). A "remainder" of portraits at
+the end of a grouping pass must never be left as a lone portrait: reflow
+sizes (e.g. 3+1 → 2+2) or merge into a neighbouring composition instead.
 
 Two landscape images should **not** automatically be placed side-by-side —
 show them as separate compositions unless their aspect ratios genuinely
@@ -259,6 +262,11 @@ common real phone-photo ratio (iPhone EXIF-rotated, 0.75) as "alone,"
 which meant grouping never fired on real data (see TASKS.md Phase 4 for
 the full story). Worth remembering for Phase 5's colour work too: verify
 any perceptual/aesthetic thresholds against real photos, not assumptions.
+**Revised post-launch** (user-reported: real playback showed lone portrait
+compositions): a portrait is now never shown alone under any
+circumstance — not even the "wide/near-square portrait looks better alone"
+heuristic this section originally described. See TASKS.md Phase 4 addendum
+for the corrected algorithm.
 
 ### 5.3 Colour & Mat Engine
 

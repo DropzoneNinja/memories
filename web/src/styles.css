@@ -327,8 +327,8 @@ h3 {
 .tv-detail-pane {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  max-width: 980px;
+  gap: 24px;
+  max-width: 1040px;
 }
 
 .tv-header {
@@ -337,71 +337,110 @@ h3 {
   gap: 12px;
 }
 
-.current-image {
+.now-showing {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.now-showing h3 {
+  font-size: 13px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Sized like a real TV frame (16:9) rather than a small thumbnail — a
+   collage can hold up to 9 photos (PROJECT.md §5.2 addendum), so it needs
+   real room to stay readable. */
+.composition-frame {
+  width: 100%;
+  max-width: 640px;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+}
+
+/* One row per collageRowSizes() group (a single row for the non-collage
+   1-3 photo case) — same row-stack arrangement as the TV's own
+   tv/src/render/ImageStage.ts, not just the same row-size math. */
+.composition-row {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+/* Shared by both the main composition and the "Next" thumbnails (via
+   .thumbnail-group descendant rules below) — every individual photo is
+   its own click target (click any current or future photo to see its
+   details), with a highlight ring on whichever one is selected. Never
+   more than one photo highlighted at a time (see resolveSelection in
+   TvDetailPane.tsx). */
+.photo-tile {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  box-sizing: border-box;
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.photo-tile img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.photo-tile.selected {
+  border-color: var(--accent);
+}
+
+/* One photo's EXIF + its map, side by side — never more than one photo's
+   worth of EXIF on screen at once. */
+.details-row {
   display: flex;
   gap: 20px;
   align-items: flex-start;
   flex-wrap: wrap;
 }
 
-.current-image-frame {
-  width: 320px;
-  height: 220px;
-  border-radius: 4px;
-  display: flex;
-  align-items: stretch;
-  justify-content: center;
-  gap: 4px;
-  padding: 10px;
-  box-sizing: border-box;
-  overflow: hidden;
-  flex-shrink: 0;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
-  /* Reset button defaults — this is a <button>, not a <div>, so the
-     photo itself is clickable (resets the featured photo back to
-     "currently displaying"). */
-  border: none;
-  cursor: pointer;
-  font: inherit;
-}
-
-/* One <img> per composition slot (PROJECT.md §5.2 — a composition can be
-   1-3 photos, not just 1). Each takes an equal share of the frame's
-   width and contain-fits within it, same idea as the TV's own renderer:
-   never crop, never stretch, whether it's a single photo or a group. */
-.current-image-frame img {
-  flex: 1 1 0;
-  min-width: 0;
-  height: 100%;
-  object-fit: contain;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
-}
-
-.exif {
+.exif-panel {
   display: flex;
   flex-direction: column;
   gap: 4px;
   font-size: 13px;
   color: var(--text-dim);
-  min-width: 200px;
-  flex: 1 1 200px;
+  min-width: 240px;
+  flex: 1 1 240px;
+  padding: 16px 18px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 
-.exif .filename {
+.exif-panel .filename {
   color: var(--text);
   font-size: 14px;
   font-weight: 600;
 }
 
-.exif-asset + .exif-asset {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-}
-
 .location-map {
-  width: 280px;
-  height: 220px;
+  width: 380px;
+  height: 280px;
   flex-shrink: 0;
   border-radius: 4px;
   overflow: hidden;
@@ -492,30 +531,40 @@ h3 {
   flex-wrap: wrap;
 }
 
-.thumbnail {
-  width: 84px;
-  height: 84px;
+/* A composition can be 1-9 photos (PROJECT.md §5.2 addendum) — a collage
+   gets the same near-square row grid as the main composition frame above
+   (via rowsFor()/collageRowSizes()) rather than cramming all 6-9 photos
+   into one flat row, where each would be too narrow to see or click.
+   Every photo still gets its own clickable .photo-tile — never only the
+   first one visible/clickable. */
+.thumbnail-group {
+  width: 132px;
+  height: 112px;
   display: flex;
+  flex-direction: column;
   gap: 1px;
-  padding: 0;
-  border: 2px solid transparent;
+  padding: 3px;
   border-radius: 4px;
   overflow: hidden;
-  cursor: pointer;
   background: var(--panel-alt);
+  border: 1px solid var(--border);
+  box-sizing: border-box;
 }
 
-.thumbnail.selected {
-  border-color: var(--accent);
-}
-
-/* A composition can be 1-3 photos (PROJECT.md §5.2) — each gets an equal
-   slice of the thumbnail rather than only ever showing the first one. */
-.thumbnail img {
+.thumbnail-group-row {
   flex: 1 1 0;
-  min-width: 0;
-  height: 100%;
+  min-height: 0;
+  display: flex;
+  gap: 1px;
+}
+
+.thumbnail-group .photo-tile {
+  padding: 1px;
+}
+
+.thumbnail-group .photo-tile img {
   object-fit: cover;
+  box-shadow: none;
 }
 
 .config-form {

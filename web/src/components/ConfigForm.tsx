@@ -44,6 +44,9 @@ export function ConfigForm({ tv, albums, onSaved }: Props) {
   const [disconnectedBehavior, setDisconnectedBehavior] = useState<DisconnectedBehavior>(
     config?.disconnectedBehavior ?? 'CONTINUE_QUEUE',
   );
+  const [maxCollageImages, setMaxCollageImages] = useState(config?.maxCollageImages ?? 6);
+  const [collageFrequency, setCollageFrequency] = useState(config?.collageFrequency ?? 0);
+  const [cacheSize, setCacheSize] = useState(config?.cacheSize ?? 8);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
@@ -60,6 +63,9 @@ export function ConfigForm({ tv, albums, onSaved }: Props) {
         playbackMode,
         matMode,
         disconnectedBehavior,
+        maxCollageImages,
+        collageFrequency,
+        cacheSize,
       };
       const result = await api.updateConfig(tv.id, body);
       onSaved(result);
@@ -126,6 +132,34 @@ export function ConfigForm({ tv, albums, onSaved }: Props) {
             </option>
           ))}
         </select>
+      </label>
+      <label>
+        Cache size (presentations)
+        <input
+          type="number"
+          min={1}
+          value={cacheSize}
+          onChange={(e) => setCacheSize(Number(e.target.value))}
+        />
+      </label>
+      <label>
+        Max images per collage
+        <input
+          type="number"
+          min={2}
+          max={9}
+          value={maxCollageImages}
+          onChange={(e) => setMaxCollageImages(Number(e.target.value))}
+        />
+      </label>
+      <label>
+        Collage frequency (0 = off)
+        <input
+          type="number"
+          min={0}
+          value={collageFrequency}
+          onChange={(e) => setCollageFrequency(Number(e.target.value))}
+        />
       </label>
       {error && <p className="form-error">{error}</p>}
       <div className="form-actions">

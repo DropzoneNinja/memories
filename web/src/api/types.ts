@@ -37,11 +37,13 @@ export interface Configuration {
   matMode: MatMode;
   disconnectedBehavior: DisconnectedBehavior;
   cacheSize: number;
+  maxCollageImages: number;
+  collageFrequency: number;
   createdAt: string;
 }
 
-export type SlotPosition = 'full' | 'left' | 'center' | 'right';
-export type LayoutType = 'single' | 'two-portrait' | 'three-portrait';
+export type SlotPosition = 'full' | 'left' | 'center' | 'right' | 'grid';
+export type LayoutType = 'single' | 'two-portrait' | 'three-portrait' | 'collage';
 
 export interface PresentationAssetMetadata {
   album: string;
@@ -121,4 +123,6 @@ export interface ConfigInput {
   matMode?: MatMode;
   disconnectedBehavior?: DisconnectedBehavior;
   cacheSize?: number;
+  maxCollageImages?: number;
+  collageFrequency?: number;
 }

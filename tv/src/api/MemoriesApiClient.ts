@@ -1,4 +1,4 @@
-import type { PairingResponse, PlaylistResponse, RemoteCommand } from './types';
+import type { HeartbeatResponse, PairingResponse, PlaylistResponse, RemoteCommand } from './types';
 
 // The TV never talks to Immich, and never sees its credentials — this is
 // the only backend it ever calls (PROJECT.md §6).
@@ -27,16 +27,26 @@ export class MemoriesApiClient {
 
   // `status` lets Memories Web show "currently displaying" + EXIF (§4.2,
   // Phase 6) — distinct from the playlist hand-out cursor, which runs
-  // ahead of what's actually on screen.
-  async sendHeartbeat(deviceId: string, status?: { presentationId: string; paused: boolean }): Promise<void> {
-    await fetch(this.url(`/api/v1/tvs/${deviceId}/heartbeat`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(status ?? {}),
-    }).catch(() => {
-      // Best-effort — a missed heartbeat isn't fatal (PROJECT.md §5.10
-      // disconnected-behaviour policies land in Phase 7).
-    });
+  // ahead of what's actually on screen. The response is also
+  // PlaybackController's guaranteed fallback for learning about a config
+  // change (Phase 7, §5.10) — `null` means a genuine network-level
+  // failure (never thrown; a missed heartbeat is never fatal), which
+  // PlaybackController.applyServerStatus treats as an offline signal.
+  async sendHeartbeat(
+    deviceId: string,
+    status?: { presentationId: string; paused: boolean },
+  ): Promise<HeartbeatResponse | null> {
+    try {
+      const res = await fetch(this.url(`/api/v1/tvs/${deviceId}/heartbeat`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(status ?? {}),
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
   }
 
   async pollCommands(deviceId: string): Promise<RemoteCommand[]> {

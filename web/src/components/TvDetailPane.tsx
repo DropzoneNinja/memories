@@ -44,26 +44,77 @@ function locationLabel(location: AssetLocation | null): string | null {
   return [location.city, location.state, location.country].filter(Boolean).join(', ') || null;
 }
 
-// A composition can be 1-3 images (PROJECT.md §5.2's composition engine
-// — single/two-portrait/three-portrait). `presentation.assets` isn't
+// A composition can be 1-9 images (PROJECT.md §5.2's composition engine —
+// single/two-portrait/three-portrait/collage). `presentation.assets` isn't
 // guaranteed to already be in left-to-right slot order, so this resolves
 // each slot to its asset explicitly by id — the same approach the TV's
-// own PresentationRenderer uses, and the same bug class as its original
-// "only ever renders assets[0]" issue from Phase 4, just here instead of
-// there.
+// own PresentationRenderer uses.
 function slotAssets(presentation: Presentation | null | undefined): PresentationAsset[] {
   if (!presentation) return [];
   const byId = new Map(presentation.assets.map((a) => [a.id, a]));
   return presentation.layout.slots.map((slot) => byId.get(slot.assetId)).filter((a): a is PresentationAsset => Boolean(a));
 }
 
+// Splits `count` images into a near-square stack of row sizes with no
+// empty cells (e.g. 5 -> [3, 2], not a 3x2 grid with one dead cell) —
+// ported verbatim from the TV's own tv/src/render/ImageStage.ts so a
+// collage reads identically here and on the real screen.
+function collageRowSizes(count: number): number[] {
+  const numRows = Math.min(count, Math.max(1, Math.round(Math.sqrt(count))));
+  const baseSize = Math.floor(count / numRows);
+  const extra = count % numRows;
+  return Array.from({ length: numRows }, (_, row) => baseSize + (row < extra ? 1 : 0));
+}
+
+// Groups a composition's slot assets into display rows: a real near-square
+// grid (matching the TV) for a 'collage' layout, otherwise the existing
+// single-row behaviour (1-3 photos side by side).
+function rowsFor(presentation: Presentation | null | undefined): PresentationAsset[][] {
+  const assets = slotAssets(presentation);
+  if (assets.length === 0) return [];
+  if (presentation?.layout.type !== 'collage') return [assets];
+
+  const rows: PresentationAsset[][] = [];
+  let cursor = 0;
+  for (const size of collageRowSizes(assets.length)) {
+    rows.push(assets.slice(cursor, cursor + size));
+    cursor += size;
+  }
+  return rows;
+}
+
+interface Selection {
+  asset: PresentationAsset;
+  fromNext: boolean;
+}
+
+// Resolves the single highlighted photo: an explicit pin (by asset id,
+// which survives poll refreshes by identity rather than by index/position)
+// if it still exists in `current` or `next`, else the first photo of
+// whatever's currently displaying. Never more than one photo highlighted
+// at once, and a pin pointing at a photo that has already played and
+// rolled out of the queue quietly falls back to live instead of showing
+// stale details for something no longer visible anywhere.
+function resolveSelection(detail: TvDetail | null, selectedAssetId: string | null): Selection | null {
+  if (selectedAssetId) {
+    const inCurrent = slotAssets(detail?.current).find((a) => a.id === selectedAssetId);
+    if (inCurrent) return { asset: inCurrent, fromNext: false };
+    for (const presentation of detail?.next ?? []) {
+      const inNext = slotAssets(presentation).find((a) => a.id === selectedAssetId);
+      if (inNext) return { asset: inNext, fromNext: true };
+    }
+  }
+  const currentFirst = slotAssets(detail?.current)[0];
+  return currentFirst ? { asset: currentFirst, fromNext: false } : null;
+}
+
 export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
   const [detail, setDetail] = useState<TvDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // null = the current photo is featured (the default, and what
-  // clicking the featured photo itself resets back to); an index into
-  // detail.next = that upcoming photo is featured instead.
-  const [selectedNextIndex, setSelectedNextIndex] = useState<number | null>(null);
+  // null = no explicit pin, always show whichever photo is currently live
+  // (the default). A non-null value is a real pin by asset id — see
+  // resolveSelection.
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [location, setLocation] = useState<AssetLocation | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
 
@@ -79,7 +130,7 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
 
   useEffect(() => {
     setDetail(null);
-    setSelectedNextIndex(null);
+    setSelectedAssetId(null);
     refresh();
     const interval = setInterval(refresh, DETAIL_POLL_MS);
     return () => clearInterval(interval);
@@ -96,21 +147,14 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
   // first render.
   const effectiveTv: TvSummary = detail ? { ...tv, online: detail.online, paused: detail.paused } : tv;
 
-  const featured = selectedNextIndex !== null ? (detail?.next[selectedNextIndex] ?? null) : (detail?.current ?? null);
-  const featuredSlots = slotAssets(featured);
-  // The map/location shows the composition's first (leftmost) photo —
-  // a 2/3-up composition's photos are near-always taken moments apart in
-  // the same place, and picking one keeps the map to one marker rather
-  // than needing its own per-photo click target.
-  const primaryAsset = featuredSlots[0] ?? null;
+  const selection = resolveSelection(detail, selectedAssetId);
+  const currentRows = rowsFor(detail?.current);
 
-  // Location is fetched on demand per focused asset (never part of
+  // Location is fetched on demand per highlighted asset (never part of
   // Presentation/TvDetail — the TV must never receive it, PROJECT.md
-  // §5.7/§13) and follows whichever photo is featured: the current one
-  // by default, whatever the user clicked in the "next" strip otherwise,
-  // and back to current when they click the featured photo itself.
+  // §5.7/§13) and follows whichever single photo is selected.
   useEffect(() => {
-    if (!primaryAsset) {
+    if (!selection) {
       setLocation(null);
       setLocationLoading(false);
       return;
@@ -118,7 +162,7 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
     let cancelled = false;
     setLocationLoading(true);
     api
-      .getAssetLocation(primaryAsset.id)
+      .getAssetLocation(selection.asset.id)
       .then((result) => {
         if (!cancelled) setLocation(result);
       })
@@ -131,7 +175,7 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [primaryAsset?.id]);
+  }, [selection?.asset.id]);
 
   return (
     <div className="tv-detail-pane">
@@ -144,66 +188,78 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
 
       {error && <p className="form-error">{error}</p>}
 
-      <section className="current-image">
-        {featured && featuredSlots.length > 0 ? (
-          <>
-            <button
-              type="button"
-              className="current-image-frame"
-              style={{ background: featured.background.colour }}
-              onClick={() => setSelectedNextIndex(null)}
-              title={selectedNextIndex !== null ? 'Back to the currently displaying photo' : 'Currently displaying'}
-            >
-              {featuredSlots.map((asset) => (
-                <img key={asset.id} src={api.resolveAssetUrl(asset.url)} alt="" />
-              ))}
-            </button>
-            <div className="exif">
-              <p className="album">{featuredSlots[0].metadata.album}</p>
-              {featuredSlots.map((asset) => (
-                <div key={asset.id} className="exif-asset">
-                  <p className="filename">{asset.metadata.filename}</p>
-                  {exifLines(asset.metadata).map((line) => (
-                    <p key={line} className="exif-line">
-                      {line}
-                    </p>
-                  ))}
-                </div>
-              ))}
-              {selectedNextIndex !== null && <p className="hint">Showing an upcoming photo — click it to return.</p>}
-            </div>
-            <LocationMap
-              latitude={location?.latitude ?? null}
-              longitude={location?.longitude ?? null}
-              label={locationLabel(location)}
-              loading={locationLoading}
-            />
-          </>
+      <section className="now-showing">
+        <h3>Now Showing</h3>
+        {currentRows.length > 0 && detail?.current ? (
+          <div className="composition-frame" style={{ background: detail.current.background.colour }}>
+            {currentRows.map((row, i) => (
+              <div key={i} className="composition-row">
+                {row.map((asset) => (
+                  <button
+                    key={asset.id}
+                    type="button"
+                    className={`photo-tile${selection?.asset.id === asset.id ? ' selected' : ''}`}
+                    onClick={() => setSelectedAssetId(asset.id)}
+                    title="Show this photo's details and location"
+                  >
+                    <img src={api.resolveAssetUrl(asset.url)} alt="" />
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
         ) : (
           <p className="empty-state">Nothing reported as displaying yet.</p>
         )}
       </section>
+
+      {selection && (
+        <section className="details-row">
+          <div className="exif-panel">
+            <p className="album">{selection.asset.metadata.album}</p>
+            <p className="filename">{selection.asset.metadata.filename}</p>
+            {exifLines(selection.asset.metadata).map((line) => (
+              <p key={line} className="exif-line">
+                {line}
+              </p>
+            ))}
+            {selection.fromNext && <p className="hint">Coming up next — click the current photo to return to live.</p>}
+          </div>
+          <LocationMap
+            latitude={location?.latitude ?? null}
+            longitude={location?.longitude ?? null}
+            label={locationLabel(location)}
+            loading={locationLoading}
+          />
+        </section>
+      )}
 
       <TransportControls tv={effectiveTv} />
 
       <section className="next-strip">
         <h3>Next</h3>
         <div className="thumbnail-row">
-          {(detail?.next ?? []).map((item, i) => {
-            const slots = slotAssets(item);
-            if (slots.length === 0) return null;
+          {(detail?.next ?? []).map((item) => {
+            const rows = rowsFor(item);
+            if (rows.length === 0) return null;
             return (
-              <button
-                key={item.presentationId}
-                type="button"
-                className={`thumbnail${selectedNextIndex === i ? ' selected' : ''}`}
-                onClick={() => setSelectedNextIndex(i)}
-                title="Show this photo's details and location above"
-              >
-                {slots.map((asset) => (
-                  <img key={asset.id} src={api.resolveAssetUrl(asset.url)} alt="" />
+              <div key={item.presentationId} className="thumbnail-group">
+                {rows.map((row, i) => (
+                  <div key={i} className="thumbnail-group-row">
+                    {row.map((asset) => (
+                      <button
+                        key={asset.id}
+                        type="button"
+                        className={`photo-tile${selection?.asset.id === asset.id ? ' selected' : ''}`}
+                        onClick={() => setSelectedAssetId(asset.id)}
+                        title="Show this photo's details and location"
+                      >
+                        <img src={api.resolveAssetUrl(asset.url)} alt="" />
+                      </button>
+                    ))}
+                  </div>
                 ))}
-              </button>
+              </div>
             );
           })}
           {(!detail || detail.next.length === 0) && <p className="hint">Queue is empty.</p>}

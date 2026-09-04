@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { regenerateQueue, getNextPlaylistItems, getUpcomingPreview, queueItemToPresentation } from '../playlist/queue.js';
 import { requireAuth } from '../auth/middleware.js';
+import * as realtimeHub from '../realtime/hub.js';
 
 const PAIRING_CODE_TTL_MS = 10 * 60_000;
 // A TV heartbeats every 30s (tv/src/main.ts) — 3x that gives a generous
@@ -44,6 +45,8 @@ const configBodySchema = z.object({
     .optional(),
   disconnectedBehavior: z.enum(['CONTINUE_QUEUE', 'REPEAT_QUEUE', 'FREEZE']).optional(),
   cacheSize: z.number().int().positive().optional(),
+  maxCollageImages: z.number().int().min(2).max(9).optional(),
+  collageFrequency: z.number().int().min(0).optional(),
 });
 
 const commandBodySchema = z.object({
@@ -112,6 +115,19 @@ export async function tvRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // Push channel (Phase 7, PROJECT.md §5.10) — a TV connects here after
+  // pairing and gets a `config-changed` message whenever an admin saves a
+  // new config for it (see the PUT .../config handler below). No auth
+  // (device-facing, §6/§13 — the TV has no login concept); a dead/unknown
+  // deviceId just never gets subscribed rather than erroring, since a
+  // socket failing to attach must never block the TV's own startup — it
+  // falls back to picking up the change on its next heartbeat regardless.
+  app.get<{ Params: { deviceId: string } }>('/api/v1/tvs/:deviceId/ws', { websocket: true }, (socket, request) => {
+    const { deviceId } = request.params;
+    realtimeHub.subscribe(deviceId, socket);
+    socket.on('close', () => realtimeHub.unsubscribe(deviceId, socket));
+  });
+
   app.post<{ Params: { deviceId: string } }>('/api/v1/tvs/:deviceId/heartbeat', async (request, reply) => {
     // Body is optional/best-effort from the TV's side (§5.10 — a
     // heartbeat must never fail hard), so an empty/invalid body just
@@ -130,7 +146,25 @@ export async function tvRoutes(app: FastifyInstance): Promise<void> {
       })
       .catch(() => null);
     if (!tv) return reply.code(404).send({ error: 'TV not found' });
-    return { ok: true };
+
+    // The heartbeat is the TV's *guaranteed* fallback for learning about a
+    // config change (Phase 7, §5.10) — it's called unconditionally on a
+    // fixed interval regardless of whether the WS push above is connected,
+    // so piggybacking these fields here means correctness never depends on
+    // a socket staying open. Also doubles as the "retry the API every N
+    // minutes in the background" signal: a successful heartbeat response
+    // is definitionally "reconnected."
+    const config = await prisma.configuration.findFirst({
+      where: { tvId: tv.id },
+      orderBy: { version: 'desc' },
+    });
+
+    return {
+      ok: true,
+      configurationVersion: config?.version ?? 0,
+      cacheSize: config?.cacheSize ?? 8,
+      disconnectedBehavior: config?.disconnectedBehavior ?? 'CONTINUE_QUEUE',
+    };
   });
 
   app.get<{ Params: { deviceId: string } }>('/api/v1/tvs/:deviceId/commands', async (request, reply) => {
@@ -232,10 +266,13 @@ export async function tvRoutes(app: FastifyInstance): Promise<void> {
           disconnectedBehavior:
             parsed.data.disconnectedBehavior ?? latest?.disconnectedBehavior ?? 'CONTINUE_QUEUE',
           cacheSize: parsed.data.cacheSize ?? latest?.cacheSize ?? 8,
+          maxCollageImages: parsed.data.maxCollageImages ?? latest?.maxCollageImages ?? 6,
+          collageFrequency: parsed.data.collageFrequency ?? latest?.collageFrequency ?? 0,
         },
       });
 
       await regenerateQueue(tv.id, config);
+      realtimeHub.notifyConfigChanged(tv.deviceId, config.version);
       return config;
     },
   );

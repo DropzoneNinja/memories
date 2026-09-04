@@ -4,7 +4,9 @@
 // side per the server's layout slots (Phase 4) — each slot gets an equal
 // share of the width and contain-fits its own image independently, so a
 // two/three-portrait composition never crops or stretches any one photo
-// to match the others.
+// to match the others. A 'collage' layout (composition addendum) renders
+// as a near-square stack of rows instead of one flat row — see show()'s
+// `layoutType` branch.
 //
 // Faux-3D framing (Phase 5, §5.4): a faint tonal gradient across the mat,
 // plus — driven by the server's `frame` field, since the TV never makes
@@ -54,6 +56,59 @@ function boxShadowFor(frame: FrameStyle): string {
   return layers.join(', ');
 }
 
+// One flex row of equally-sized, contain-fit, matted slots — the shared
+// building block for both a normal (non-collage) composition and each row
+// of a collage grid. `alignItems: stretch` lets a row placed inside a
+// collage's column stack fill whatever height its row was allotted, the
+// same way a single full-height row already fills the whole layer.
+function buildRow(urls: string[], boxShadow: string): HTMLDivElement {
+  const row = document.createElement('div');
+  row.style.display = 'flex';
+  row.style.alignItems = 'stretch';
+  row.style.justifyContent = 'center';
+  row.style.width = '100%';
+  row.style.height = '100%';
+  row.style.minHeight = '0';
+
+  for (const url of urls) {
+    const slot = document.createElement('div');
+    slot.style.flex = '1 1 0';
+    slot.style.minWidth = '0';
+    slot.style.minHeight = '0';
+    slot.style.display = 'flex';
+    slot.style.alignItems = 'center';
+    slot.style.justifyContent = 'center';
+    // Reserves the mat margin on every side of this photo (see
+    // MAT_MARGIN) — also what separates adjacent photos in a
+    // multi-slot composition, so no extra inter-slot gap is needed on
+    // top of it, in either a row or a collage's stacked rows.
+    slot.style.padding = MAT_MARGIN;
+    slot.style.boxSizing = 'border-box';
+
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = '';
+    img.style.maxWidth = '100%';
+    img.style.maxHeight = '100%';
+    img.style.objectFit = 'contain';
+    if (boxShadow) img.style.boxShadow = boxShadow;
+    slot.appendChild(img);
+    row.appendChild(slot);
+  }
+
+  return row;
+}
+
+// Splits `count` images into a near-square stack of row sizes with no
+// empty cells — e.g. 5 -> [3, 2], not a 3x2 grid with one dead cell. Earlier
+// rows absorb the remainder so row sizes never increase top to bottom.
+function collageRowSizes(count: number): number[] {
+  const numRows = Math.min(count, Math.max(1, Math.round(Math.sqrt(count))));
+  const baseSize = Math.floor(count / numRows);
+  const extra = count % numRows;
+  return Array.from({ length: numRows }, (_, row) => baseSize + (row < extra ? 1 : 0));
+}
+
 export class ImageStage {
   private root: HTMLDivElement;
   private layers: [HTMLDivElement, HTMLDivElement];
@@ -90,11 +145,12 @@ export class ImageStage {
     this.root.style.background = `radial-gradient(ellipse at center, rgba(255,255,255,0.025), rgba(0,0,0,0.06)), ${color}`;
   }
 
-  // One image per slot, left-to-right. A single-slot composition (the
-  // common case) behaves exactly as before: one image, fully centered.
-  // `frame` comes straight from the server's Presentation — the TV never
-  // decides its own framing style (§5.1).
-  show(imageUrls: string[], frame: FrameStyle = NO_FRAME): void {
+  // One image per slot, left-to-right (or, for a collage, left-to-right
+  // then top-to-bottom). A single-slot composition (the common case)
+  // behaves exactly as before: one image, fully centered. `frame` and
+  // `layoutType` come straight from the server's Presentation — the TV
+  // never decides its own composition or framing style (§5.1).
+  show(imageUrls: string[], frame: FrameStyle = NO_FRAME, layoutType?: string): void {
     const nextIndex = this.activeLayer === 0 ? 1 : 0;
     const nextLayer = this.layers[nextIndex];
     const prevLayer = this.layers[this.activeLayer];
@@ -102,29 +158,30 @@ export class ImageStage {
     nextLayer.innerHTML = '';
 
     const boxShadow = boxShadowFor(frame);
-    for (const url of imageUrls) {
-      const slot = document.createElement('div');
-      slot.style.flex = '1 1 0';
-      slot.style.minWidth = '0';
-      slot.style.display = 'flex';
-      slot.style.alignItems = 'center';
-      slot.style.justifyContent = 'center';
-      // Reserves the mat margin on every side of this photo (see
-      // MAT_MARGIN) — also what separates adjacent photos in a
-      // two/three-portrait composition, so no extra inter-slot gap is
-      // needed on top of it.
-      slot.style.padding = MAT_MARGIN;
-      slot.style.boxSizing = 'border-box';
 
-      const img = document.createElement('img');
-      img.src = url;
-      img.alt = '';
-      img.style.maxWidth = '100%';
-      img.style.maxHeight = '100%';
-      img.style.objectFit = 'contain';
-      if (boxShadow) img.style.boxShadow = boxShadow;
-      slot.appendChild(img);
-      nextLayer.appendChild(slot);
+    if (layoutType === 'collage' && imageUrls.length > 1) {
+      // Near-square stack of rows, each filling its full share of height —
+      // every cell is exactly filled edge to edge (mat padding only, via
+      // buildRow's per-slot MAT_MARGIN), so the whole frame minus the mat
+      // is used regardless of how many images the collage holds.
+      const stack = document.createElement('div');
+      stack.style.display = 'flex';
+      stack.style.flexDirection = 'column';
+      stack.style.width = '100%';
+      stack.style.height = '100%';
+
+      let cursor = 0;
+      for (const rowSize of collageRowSizes(imageUrls.length)) {
+        const rowEl = buildRow(imageUrls.slice(cursor, cursor + rowSize), boxShadow);
+        rowEl.style.flex = '1 1 0';
+        rowEl.style.minHeight = '0';
+        stack.appendChild(rowEl);
+        cursor += rowSize;
+      }
+
+      nextLayer.appendChild(stack);
+    } else {
+      nextLayer.appendChild(buildRow(imageUrls, boxShadow));
     }
 
     // Force a layout flush so the opacity transition actually animates.

@@ -5,8 +5,12 @@
 // Composition engine (Phase 4, PROJECT.md §5.2): 'single' covers one
 // landscape/square image or one standalone portrait; 'two-portrait' and
 // 'three-portrait' are grouped portraits, left-to-right in slot order.
-export type LayoutType = 'single' | 'two-portrait' | 'three-portrait';
-export type SlotPosition = 'full' | 'left' | 'center' | 'right';
+// 'collage' (composition addendum) is a variable-length grid of any
+// orientation, still left-to-right/top-to-bottom in slot order — position
+// is always 'grid' for these slots since layout is order-driven, not
+// position-driven (see ImageStage.show).
+export type LayoutType = 'single' | 'two-portrait' | 'three-portrait' | 'collage';
+export type SlotPosition = 'full' | 'left' | 'center' | 'right' | 'grid';
 
 export interface PresentationSlot {
   assetId: string;
@@ -39,6 +43,19 @@ export interface PairingResponse {
   name?: string | null;
   pairingCode?: string;
   expiresAt?: string;
+}
+
+export type DisconnectedBehavior = 'CONTINUE_QUEUE' | 'REPEAT_QUEUE' | 'FREEZE';
+
+// The heartbeat response (Phase 7, PROJECT.md §5.10) is the TV's
+// *guaranteed* way of learning about a config change — piggybacked on the
+// existing 30s heartbeat rather than a separate poll, so correctness never
+// depends on the ConfigSocket WebSocket push staying connected.
+export interface HeartbeatResponse {
+  ok: true;
+  configurationVersion: number;
+  cacheSize: number;
+  disconnectedBehavior: DisconnectedBehavior;
 }
 
 export interface RemoteCommand {
