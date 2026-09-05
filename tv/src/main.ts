@@ -28,6 +28,11 @@ const DIAGNOSTICS_CHORD_WINDOW_MS = 2000;
 
 const stage = document.getElementById('stage')!;
 const deviceId = getOrCreateDeviceId();
+// Which Memories API server this build talks to — baked in at build time
+// from tv/.env's VITE_MEMORIES_API_URL (gitignored, local per deployment).
+// For a real TV, set this via `npm run deploy [tvIp] <serverUrl>`
+// (tv/scripts/deploy.cjs) rather than hand-editing .env — it saves the URL
+// there for every future deploy to reuse automatically.
 const apiBaseUrl = (import.meta.env.VITE_MEMORIES_API_URL as string | undefined) ?? 'http://localhost:4000';
 const api = new MemoriesApiClient(apiBaseUrl);
 const screenSize = getScreenSize();

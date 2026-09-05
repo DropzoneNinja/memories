@@ -1,9 +1,11 @@
 # Memories
 
 A self-hosted photo-frame system for a Samsung Frame TV, sourced from a
-self-hosted [Immich](https://immich.app) library. See [PROJECT.md](PROJECT.md)
-for the full spec and [TASKS.md](TASKS.md) for the build checklist.
-`PROJECT_OLD.md` is superseded and kept for historical reference only.
+self-hosted [Immich](https://immich.app) library. See
+[INSTALLATION.md](INSTALLATION.md) to stand up the stack and deploy the TV
+app, [PROJECT.md](PROJECT.md) for the full spec, and [TASKS.md](TASKS.md)
+for the build checklist. `PROJECT_OLD.md` is superseded and kept for
+historical reference only.
 
 ## Layout
 
@@ -16,7 +18,7 @@ for the full spec and [TASKS.md](TASKS.md) for the build checklist.
   thin renderer with no settings UI of its own (PROJECT.md §6).
 - `docker-compose.yml` — runs `api` + `web` + `postgres`. `tv/` is **not**
   part of Compose — it's built, signed, and installed on the physical TV
-  instead (see [TV build & deploy](#tv-build--deploy)).
+  instead (see [INSTALLATION.md](INSTALLATION.md#tv-build--deploy)).
 
 ## Status
 
@@ -28,83 +30,6 @@ that can be checked off by writing code — see TASKS.md's Phase 8 section
 for exactly what's been set up to make that observation possible (logging,
 the diagnostics view, an automated bounded-growth regression test) and
 what's still an open, real-time task.
-
-## Prerequisites
-
-- Docker + Docker Compose (runs `api` + `web` + `postgres`)
-- Node.js 20+ and npm, for local dev outside Docker and for the TV build
-- A running Immich instance reachable from wherever `api` runs
-- For building/installing the actual TV app: a Samsung Account (for TV
-  certificate signing) — see [TV build & deploy](#tv-build--deploy)
-
-## Setup
-
-1. Copy the env template and fill it in:
-
-   ```sh
-   cp .env.example .env
-   ```
-
-   - `POSTGRES_*` — any values; Compose provisions the database from these.
-   - `IMMICH_BASE_URL` — your Immich server's address. This is the only
-     Immich-related value that goes in `.env`: **API keys are no longer
-     configured here** — each Memories Web user connects their own from
-     the dashboard's Settings panel (see
-     [Connecting Immich accounts](#connecting-immich-accounts)).
-   - `SESSION_SECRET` — a real random value (signs dashboard login
-     tokens). Don't leave it as `changeme`.
-   - `ENCRYPTION_KEY` — a real random 32-byte hex value (encrypts each
-     user's stored Immich API key at rest). Generate one with:
-
-     ```sh
-     openssl rand -hex 32
-     ```
-
-   - `WEB_API_BASE_URL` — the address the *browser* (not the TV) reaches
-     the API on, e.g. `http://localhost:4000` for local dev or your LAN
-     host's address for a real deployment.
-   - `LOG_LEVEL` — optional, defaults to `info` (see
-     [Logs & diagnostics](#logs--diagnostics)).
-
-2. Bring up the backend/dashboard stack:
-
-   ```sh
-   docker compose up -d --build
-   ```
-
-   This starts `postgres` (host port `5433`, to avoid clashing with any
-   local Postgres on `5432`), `api` (port `4000`), and `web` (port
-   `5173`). The API container applies any pending Prisma migrations on
-   startup, before it starts serving traffic — a single `docker compose
-   up` is genuinely enough for a from-scratch deployment, fresh database
-   included.
-
-3. Provision a dashboard login — there's no self-registration form on
-   purpose (PROJECT.md §12: a household system, not a multi-tenant
-   product):
-
-   ```sh
-   cd api
-   npm install   # only needed once, for the script's own dependencies
-   npm run create-user -- --email you@example.com --password 'a real password' --admin
-   ```
-
-4. Open `http://localhost:5173` (or your LAN host's address), sign in,
-   and connect your Immich account (below) before pairing a TV.
-
-## Connecting Immich accounts
-
-Each Memories Web user connects their **own** Immich API key from the
-dashboard's "Immich Settings" panel (top bar) — generate one in Immich
-under Account Settings → API Keys (minimum permissions: `album.read`,
-`asset.read`, `asset.view`). The key is verified against Immich before
-being saved, then stored encrypted (never returned by any API response).
-
-Whoever last saves a TV's configuration determines which Immich account
-that TV's photos come from (`Configuration.immichOwnerId` — see PROJECT.md
-§7's addendum). If a TV's album picker shows "connect your Immich
-account first," that's this — open Settings, connect a key, then save the
-TV's configuration again.
 
 ## Dev workflow
 
@@ -165,59 +90,9 @@ ever logs API keys, credentials, or tokens.
   and the running app version — a small corner overlay, never shown
   during normal playback otherwise.
 
-## TV build & deploy
+## Installing / deploying
 
-Built with the "Tizen TV" VS Code extension's underlying libraries,
-scripted rather than IDE-driven:
-
-```sh
-cd tv
-npm install
-npm run build
-npm run deploy [tvIp]   # defaults to $MEMORIES_TV_IP, then 10.10.10.80
-```
-
-`npm run deploy` builds, signs, installs, and launches on a real TV via
-`sdb` (auto-downloaded on first use). First run mints a generic Tizen SDK
-sample certificate — enough to produce a validly-*structured* package, but
-a genuine retail Samsung TV additionally rejects it
-(`Invalid certificate chain with certificate in signature`) until you've
-registered a Samsung-issued, device-ID-linked distributor certificate:
-install the "Tizen Extension" for VS Code, run its Certificate Manager
-against your Samsung Account and the TV's device ID, then import the
-resulting `.p12` via `node scripts/import-samsung-cert.cjs`. See
-PROJECT.md §10 for the full story.
-
-## Troubleshooting
-
-Real issues hit during development, in case they recur:
-
-- **TV makes zero network requests, not even a failed one** — Tizen's
-  WAC-style access whitelist (unrelated to the `internet` privilege)
-  silently blocks all outbound `fetch`/XHR unless `config.xml` declares
-  `<access origin="*" subdomains="true"/>`. Fails completely silently
-  on-device; check this first.
-- **API can't reach Immich, but `dns.resolve4()` works fine in the same
-  container** — Alpine's musl libc has a `getaddrinfo` bug that breaks
-  Node's `fetch()`. `api/Dockerfile` uses `node:20-slim` (Debian), not
-  Alpine, for exactly this reason — don't switch it back.
-- **Install fails on real hardware but not the emulator**: `Check
-  certificate error: Invalid certificate chain with certificate in
-  signature` — see [TV build & deploy](#tv-build--deploy); the generic
-  Tizen distributor cert isn't accepted by genuine retail units.
-- **Tizen Studio doesn't work at all on Apple Silicon** — its
-  Emulator/toolchain isn't supported on ARM Macs as of 6.x and the IDE is
-  effectively deprecated. Use the "Tizen TV" VS Code extension instead
-  (already how `tv/scripts/deploy.cjs` works) — see PROJECT.md §10.
-- **A map tile provider returns HTTP 200 but shows a "API key required"
-  watermark instead of tiles** — some providers (CARTO) now gate their
-  free tiles behind a key while still returning success; invisible to a
-  network-status check, only visible by actually looking. The dashboard's
-  location map uses plain OpenStreetMap tiles instead.
-- **Postgres port conflict** — Compose maps Postgres to host port `5433`,
-  not `5432`, specifically to avoid clashing with a local Postgres
-  install. Use `5433` for any tool connecting from the host.
-- **`prisma migrate dev` can't find a database** — it reads `DATABASE_URL`
-  from `api/.env`, which is separate from the root `.env` Compose uses;
-  either create `api/.env` or pass `DATABASE_URL=... npx prisma migrate
-  dev` inline.
+See [INSTALLATION.md](INSTALLATION.md) for first-time setup (Docker
+Compose, provisioning a login, connecting Immich) and building/installing
+the TV app on real hardware — including pointing a TV at a specific
+server deployment and troubleshooting real issues hit during development.

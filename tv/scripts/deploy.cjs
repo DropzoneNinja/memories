@@ -5,8 +5,16 @@
 // the same underlying (vscode-free) @tizentv/* libraries as a real
 // devDependency instead of reaching into an editor's extension folder.
 //
-// Usage: node scripts/deploy.js [tvIp]
+// Usage: npm run deploy [tvIp] [serverUrl]
 //   tvIp defaults to $MEMORIES_TV_IP, then 10.10.10.80.
+//   serverUrl is the Memories API this build should point at (baked in at
+//   build time as VITE_MEMORIES_API_URL, main.ts) — when given, it's saved
+//   to tv/.env so every future build/deploy reuses it automatically; when
+//   omitted, whatever's already in tv/.env (gitignored, local to this
+//   machine) is reused as-is. Pass an empty string for tvIp to update just
+//   the server URL while keeping the default TV IP: `npm run deploy ''
+//   https://memories.example.com`. This script always rebuilds
+//   (`npm run build`) so a freshly-saved URL is never stale.
 //
 // IMPORTANT — known limitation (see PROJECT.md / TASKS.md Phase 0):
 // on first run this mints a generic Tizen SDK sample certificate. That is
@@ -25,12 +33,63 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
+const { execSync } = require('child_process');
 
 const { TizenCertManager, ProfileManager } = require('@tizentv/webide-common-tizentv');
 const TVWebApp = require('@tizentv/webide-common-tizentv/lib/projectHelper');
 
-const PROJECT_DIST = path.resolve(__dirname, '..', 'dist');
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+const PROJECT_DIST = path.join(PROJECT_ROOT, 'dist');
 const TV_IP = process.argv[2] || process.env.MEMORIES_TV_IP || '10.10.10.80';
+
+// Where the build-time API URL lives (tv/.env, gitignored — Vite loads it
+// automatically on every `vite build`/`vite dev`, no extra wiring needed).
+// Reading/writing it here is what makes the server URL "remembered between
+// updates" from the operator's side: this file lives on the dev machine,
+// not the TV, so it survives every redeploy regardless of what happens to
+// the TV's own localStorage (which does NOT survive — see this script's
+// uninstall-then-reinstall behaviour below, and TASKS.md's Phase 3 note).
+const ENV_PATH = path.join(PROJECT_ROOT, '.env');
+const ENV_KEY = 'VITE_MEMORIES_API_URL';
+
+function readServerUrl() {
+  if (!fs.existsSync(ENV_PATH)) return null;
+  const match = fs.readFileSync(ENV_PATH, 'utf-8').match(new RegExp(`^${ENV_KEY}=(.*)$`, 'm'));
+  return match ? match[1].trim() : null;
+}
+
+function writeServerUrl(url) {
+  const line = `${ENV_KEY}=${url}`;
+  const existing = fs.existsSync(ENV_PATH) ? fs.readFileSync(ENV_PATH, 'utf-8') : '';
+  const pattern = new RegExp(`^${ENV_KEY}=.*$`, 'm');
+  const updated = pattern.test(existing) ? existing.replace(pattern, line) : `${existing.trimEnd()}\n${line}`.trimStart();
+  fs.writeFileSync(ENV_PATH, updated.endsWith('\n') ? updated : `${updated}\n`);
+}
+
+// Resolves which server URL this build should use, saving a newly-given
+// one for next time. Throws on an obviously malformed value rather than
+// silently baking in a typo that would only surface later as a mysterious
+// "TV never pairs" report.
+function resolveServerUrl() {
+  const givenArg = process.argv[3];
+  if (givenArg) {
+    if (!/^https?:\/\//.test(givenArg)) {
+      throw new Error(`serverUrl must start with http:// or https:// — got "${givenArg}"`);
+    }
+    writeServerUrl(givenArg);
+    console.log(`[config] saved server URL for future builds: ${givenArg}`);
+    return givenArg;
+  }
+
+  const remembered = readServerUrl();
+  if (remembered) {
+    console.log(`[config] reusing last configured server URL: ${remembered}`);
+    return remembered;
+  }
+
+  console.log('[config] no server URL configured yet — pass one: npm run deploy [tvIp] <serverUrl>');
+  return null;
+}
 
 const resourcePath = path.join(os.homedir(), 'tizen-studio-data', 'vscode-tizentv', 'resource');
 const profilePath = path.join(resourcePath, 'profiles.xml');
@@ -101,11 +160,15 @@ async function ensureProfile() {
 }
 
 async function main() {
-  if (!fs.existsSync(path.join(PROJECT_DIST, 'config.xml'))) {
-    throw new Error(`No build found at ${PROJECT_DIST} — run "npm run build" first.`);
-  }
+  resolveServerUrl();
 
   await ensureProfile();
+
+  console.log('[build] building the app (npm run build)...');
+  execSync('npm run build', { cwd: PROJECT_ROOT, stdio: 'inherit' });
+  if (!fs.existsSync(path.join(PROJECT_DIST, 'config.xml'))) {
+    throw new Error(`Build did not produce ${PROJECT_DIST}/config.xml`);
+  }
 
   console.log(`[build] signing widget from ${PROJECT_DIST}...`);
   const webApp = TVWebApp.openProject(PROJECT_DIST);

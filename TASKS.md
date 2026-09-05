@@ -1169,6 +1169,39 @@ rather than checked off. Everything else is done.
         PROJECT.md §5.11's revised wording). Rebuilt/redeployed to the
         real TV and the API; full test suite + type-check reconfirmed
         clean across all three packages.
+      - **Addendum, user-reported on the real device (2nd round)**: video
+        had a visible "flash" on every play — the `<video>`'s `poster`
+        attribute (Immich's thumbnail JPEG) showed while the stream
+        buffered, then swapped to the actual decoded first frame once
+        playback started, which read as a jarring cut between two
+        differently-composed images. Fixed by dropping `<video poster>`
+        entirely — the TV now just shows its plain background colour
+        while buffering, which is far less noticeable. The thumbnail is
+        still fetched/prefetched (Memories Web's "Now Showing"/"Next"
+        preview still uses it), just no longer displayed on the TV
+        itself. Rebuilt/redeployed to the real TV; full test suite +
+        type-check reconfirmed clean.
+- [x] TV deploy accepts the Memories API server as a parameter — user is
+      planning a separate deployment of the API/web stack on another
+      server and needs the TV app to point at it without hand-editing
+      source. `main.ts` already read `VITE_MEMORIES_API_URL` at build
+      time (baked in from `tv/.env`, gitignored); the only gap was
+      `tv/scripts/deploy.cjs` never touched it and required a separate
+      manual `npm run build` first. Now `npm run deploy [tvIp]
+      [serverUrl]` accepts the server URL as a second argument, writes it
+      into `tv/.env` (so every later deploy that omits it reuses the last
+      one automatically — "remembered between updates" from the
+      operator's side, since this file lives on the dev machine, not the
+      TV, and is unaffected by the TV's own localStorage being wiped on
+      every reinstall), validates it looks like a real URL before saving,
+      and now always rebuilds before signing/installing so a freshly-saved
+      URL is never stale. Considered and rejected: an on-device setup
+      screen for typing the URL via remote — no text-entry UX exists in
+      this app today, and making it survive a redeploy would need an
+      unverified switch from uninstall-then-reinstall to an update-in-
+      place install. Verified: the `.env` read/write logic against a real
+      copy of the file (restored after), full TV test suite + type-check
+      clean, `node --check` on the script.
 
 ---
 
