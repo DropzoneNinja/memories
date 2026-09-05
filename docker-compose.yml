@@ -27,8 +27,9 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-memories}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-memories}
       IMMICH_BASE_URL: ${IMMICH_BASE_URL}
-      IMMICH_API_KEY: ${IMMICH_API_KEY}
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       PORT: 4000
     ports:
       # Must stay reachable from the TV's IoT VLAN (10.10.40.0/24) as well as

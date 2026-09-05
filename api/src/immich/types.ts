@@ -48,6 +48,12 @@ export interface ImmichAsset {
   originalFileName: string;
   type: 'IMAGE' | 'VIDEO';
   exifInfo?: ImmichExif | null;
+  // VIDEO assets only — the spec's `duration` field, "HH:MM:SS.ssssss"
+  // (e.g. "0:01:23.456000"). Needs verification against the real running
+  // instance before being trusted (see ImmichClient.integration.test.ts's
+  // new video block) — this codebase has already found the real server
+  // disagreeing with the spec once (top-level width/height).
+  duration?: string | null;
 }
 
 export type ImmichThumbnailSize = 'thumbnail' | 'preview';

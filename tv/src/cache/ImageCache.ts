@@ -16,6 +16,8 @@
 // `B` (the blob shape) and the fetch/create/revoke functions are generic
 // and injectable purely for unit testing without a real browser — in
 // production every default is the real global.
+import { log } from '../log/Logger.js';
+
 export interface FetchLikeResponse<B> {
   ok: boolean;
   status: number;
@@ -104,14 +106,21 @@ export class ImageCache<B extends { size: number } = Blob> {
   evictToFit(keepUrls: ReadonlySet<string>): void {
     if (this.totalBytes() <= this.ceilingBytes) return;
 
+    const bytesBefore = this.totalBytes();
     const evictable = [...this.entries.entries()]
       .filter(([url]) => !keepUrls.has(url))
       .sort((a, b) => a[1].lastUsed - b[1].lastUsed);
 
+    let evicted = 0;
     for (const [url, entry] of evictable) {
       if (this.totalBytes() <= this.ceilingBytes) break;
       this.entries.delete(url);
       this.revokeObjectUrl(entry.objectUrl);
+      evicted += 1;
+    }
+
+    if (evicted > 0) {
+      log.debug('cache evicted', { evicted, bytesBefore, bytesAfter: this.totalBytes(), remaining: this.entries.size });
     }
   }
 }

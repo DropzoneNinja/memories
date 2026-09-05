@@ -33,7 +33,7 @@ export function LoginScreen() {
   return (
     <div className="login-screen">
       <form className="login-card" onSubmit={handleSubmit}>
-        <h1>Memories</h1>
+        <img className="login-logo" src="/logo.png" alt="Memories" />
         <label>
           Email
           <input

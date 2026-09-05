@@ -2,6 +2,7 @@
 // of the TV app is testable in a normal browser (PROJECT.md §10, §15.4).
 // Falls back to keyboard arrow keys when `tizen` isn't present, so this
 // works in a desktop browser during development.
+import { log } from '../log/Logger';
 
 export type RemoteKey =
   | "Up"
@@ -33,17 +34,28 @@ export class TizenAdapter {
 
   init(): void {
     const tizen = getTizen();
+    log.info('tizen lifecycle: init', { runningOnTv: Boolean(tizen) });
     if (tizen) {
       try {
         for (const key of TIZEN_KEYS_TO_REGISTER) {
           tizen.tvinputdevice.registerKey(key);
         }
       } catch (err) {
-        console.warn("Tizen key registration failed", err);
+        log.warn('tizen key registration failed', { message: String(err) });
       }
     }
 
     document.addEventListener("keydown", (event) => this.handleKeyDown(event));
+
+    // Standard Page Visibility API, not Tizen-specific — but this is the
+    // one lifecycle signal every Tizen TV app reliably gets on suspend/
+    // resume (backgrounded by the TV's own app switcher, screensaver, or
+    // input-source change), useful for explaining a gap in the diagnostics
+    // log ("why did nothing happen for 20 minutes") without needing an
+    // unverified Tizen-specific lifecycle API (PROJECT.md §15.2/§15.5).
+    document.addEventListener("visibilitychange", () => {
+      log.info("tizen lifecycle: visibility changed", { visible: document.visibilityState === "visible" });
+    });
   }
 
   onKey(handler: KeyHandler): void {

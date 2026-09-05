@@ -11,11 +11,29 @@ function presentation(id: string, duration = 20): Presentation {
   return {
     presentationId: id,
     duration,
+    kind: 'image',
+    loop: false,
     layout: { type: 'single', slots: [{ assetId: id, position: 'full' }] },
-    background: { type: 'mat', colour: '#111' },
+    background: { type: 'mat', colour: '#111', texture: null },
     frame: { shadow: 'none', bevel: 'none' },
     transition: { type: 'crossfade', duration: 2 },
     assets: [{ id, url: `/assets/${id}`, metadata: {} }],
+  };
+}
+
+// Video counterpart to presentation() above — used by the cache-exclusion
+// and pause/resume-in-place regression tests below.
+function videoPresentation(id: string, options: { loop?: boolean; duration?: number } = {}): Presentation {
+  return {
+    presentationId: id,
+    duration: options.duration ?? 20,
+    kind: 'video',
+    loop: options.loop ?? false,
+    layout: { type: 'single', slots: [{ assetId: id, position: 'full' }] },
+    background: { type: 'mat', colour: '#0a0a0c', texture: null },
+    frame: { shadow: 'none', bevel: 'none' },
+    transition: { type: 'crossfade', duration: 2 },
+    assets: [{ id, url: `/assets/${id}/thumbnail`, videoUrl: `/assets/${id}/video`, metadata: {} }],
   };
 }
 
@@ -23,17 +41,25 @@ interface FakeRenderer extends RendererLike {
   renders: { presentation: Presentation; autoAdvance: boolean }[];
   clearCalls: number;
   restartCalls: number[];
+  pauseMediaCalls: number;
+  resumeMediaCalls: Presentation[];
 }
 
 function makeFakeRenderer(): FakeRenderer {
   const renders: { presentation: Presentation; autoAdvance: boolean }[] = [];
   const restartCalls: number[] = [];
+  const resumeMediaCalls: Presentation[] = [];
   let clearCalls = 0;
+  let pauseMediaCalls = 0;
   return {
     renders,
     restartCalls,
+    resumeMediaCalls,
     get clearCalls() {
       return clearCalls;
+    },
+    get pauseMediaCalls() {
+      return pauseMediaCalls;
     },
     render(p, autoAdvance = true) {
       renders.push({ presentation: p, autoAdvance });
@@ -44,6 +70,19 @@ function makeFakeRenderer(): FakeRenderer {
     clearTimer() {
       clearCalls += 1;
     },
+    // Maps onto the same clearCalls/restartCalls counters as the old
+    // direct clearTimer()/restartTimer() call sites did — pause()/resume()
+    // and the FREEZE policy now call these instead (PlaybackController.ts),
+    // but the underlying "timer cleared/restarted" assertions below are
+    // unchanged.
+    pauseMedia() {
+      pauseMediaCalls += 1;
+      clearCalls += 1;
+    },
+    resumeMedia(p) {
+      resumeMediaCalls.push(p);
+      restartCalls.push(p.duration);
+    },
     setOnAdvance() {
       // Not exercised directly — tests drive next()/previous() themselves.
     },
@@ -52,16 +91,21 @@ function makeFakeRenderer(): FakeRenderer {
 
 interface FakeCache extends CacheLike {
   evictCalls: ReadonlySet<string>[];
+  prefetchCalls: string[][];
 }
 
 function makeFakeCache(): FakeCache {
   const evictCalls: ReadonlySet<string>[] = [];
+  const prefetchCalls: string[][] = [];
   return {
     evictCalls,
+    prefetchCalls,
     async get(url) {
       return url;
     },
-    prefetch() {},
+    prefetch(urls) {
+      prefetchCalls.push(urls);
+    },
     evictToFit(keep) {
       evictCalls.push(keep);
     },
@@ -269,4 +313,39 @@ test('cache-size bounding: no fetch fires once cacheSize leaves zero room, even 
   await flush();
 
   assert.equal(api.calls.length, callsBefore, 'no fetch should fire once cacheSize room is exhausted');
+});
+
+test('a video presentation only feeds its poster URL into the image cache — never the stream URL', async () => {
+  const renderer = makeFakeRenderer();
+  const cache = makeFakeCache();
+  const api = makeFakeApi([{ configurationVersion: 1, items: [videoPresentation('v0'), presentation('p0')] }]);
+  const controller = new PlaybackController(api, 'device-1', {} as HTMLElement, { renderer, imageCache: cache });
+  await controller.start();
+  await flush();
+
+  const prefetched = cache.prefetchCalls.flat();
+  assert.ok(prefetched.includes('/assets/v0/thumbnail'), 'the video poster URL should be prefetched like any thumbnail');
+  assert.ok(!prefetched.includes('/assets/v0/video'), 'the video stream URL must never enter the Blob image cache');
+
+  const keptUrls = new Set(cache.evictCalls.flatMap((keep) => [...keep]));
+  assert.ok(!keptUrls.has('/assets/v0/video'), 'evictToFit\'s keep-set must never reference a video stream URL either');
+});
+
+test('pause()/resume() on a video presentation freeze/resume in place rather than re-rendering', async () => {
+  const renderer = makeFakeRenderer();
+  const cache = makeFakeCache();
+  const api = makeFakeApi([{ configurationVersion: 1, items: [videoPresentation('v0', { loop: false })] }]);
+  const controller = new PlaybackController(api, 'device-1', {} as HTMLElement, { renderer, imageCache: cache });
+  await controller.start();
+  await flush();
+
+  const rendersBefore = renderer.renders.length;
+  controller.pause();
+  assert.equal(renderer.pauseMediaCalls, 1);
+  assert.equal(renderer.renders.length, rendersBefore, 'pause() must not re-render (would restart a video from frame 0)');
+
+  controller.resume();
+  assert.equal(renderer.resumeMediaCalls.length, 1);
+  assert.equal(renderer.resumeMediaCalls[0]?.presentationId, 'v0');
+  assert.equal(renderer.renders.length, rendersBefore, 'resume() must not re-render either');
 });

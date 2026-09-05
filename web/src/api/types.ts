@@ -12,7 +12,14 @@ export type MatMode =
   | 'ANALOGOUS'
   | 'WHITE'
   | 'BLACK'
-  | 'WOOD';
+  | 'WOOD'
+  | 'CORK'
+  | 'COTTON';
+export type MatTexture = 'wood' | 'cork' | 'cotton';
+// Post-Phase-8 addition — a TV shows either its album's photos (existing
+// behaviour) or its album's videos, never both (api/prisma/schema.prisma's
+// DisplayMode enum).
+export type DisplayMode = 'IMAGES' | 'VIDEO';
 export type DisconnectedBehavior = 'CONTINUE_QUEUE' | 'REPEAT_QUEUE' | 'FREEZE';
 export type CommandType = 'NEXT' | 'PREVIOUS' | 'PAUSE' | 'RESUME';
 
@@ -20,11 +27,40 @@ export interface User {
   id: string;
   email: string;
   isAdmin: boolean;
+  // Per-user Immich credential status — the key itself is never
+  // sent to the browser, only whether one is saved and its last 4 chars
+  // for display (see api/src/routes/settings.ts).
+  immichConnected: boolean;
+  immichKeyLast4: string | null;
+  // Set on account creation or an admin-triggered reset; cleared only by
+  // a successful PUT /me/password. While true, App.tsx shows a mandatory
+  // change-password screen instead of the dashboard (every other route
+  // also 403s server-side — see api/src/auth/middleware.ts).
+  mustChangePassword: boolean;
 }
 
 export interface LoginResponse {
   token: string;
   user: User;
+}
+
+// Admin-only user management (routes/admin.ts) — deliberately a separate,
+// smaller shape than `User`: never a password hash, an Immich key, or
+// anything about a user beyond what's needed to list/manage accounts.
+export interface AdminUserSummary {
+  id: string;
+  email: string;
+  isAdmin: boolean;
+  immichConnected: boolean;
+  mustChangePassword: boolean;
+  createdAt: string;
+}
+
+// A generated temporary password, returned exactly once by "register new
+// user" or "reset password" — never retrievable again after this.
+export interface TempCredential {
+  user: AdminUserSummary;
+  tempPassword: string;
 }
 
 export interface Configuration {
@@ -35,6 +71,10 @@ export interface Configuration {
   intervalSeconds: number;
   playbackMode: PlaybackMode;
   matMode: MatMode;
+  // VIDEO mode plays the same selected album's video assets instead of its
+  // photos — `loop` only has an effect in VIDEO mode. See ConfigForm.tsx.
+  displayMode: DisplayMode;
+  loop: boolean;
   disconnectedBehavior: DisconnectedBehavior;
   cacheSize: number;
   maxCollageImages: number;
@@ -60,14 +100,22 @@ export interface PresentationAssetMetadata {
 export interface PresentationAsset {
   id: string;
   url: string;
+  // VIDEO presentations only — the streaming-proxy URL. `url` stays the
+  // thumbnail proxy, used as the poster/preview image (see TvDetailPane's
+  // video badge).
+  videoUrl?: string;
   metadata: PresentationAssetMetadata;
 }
 
 export interface Presentation {
   presentationId: string;
   duration: number;
+  // Independent of layout.type — see api/src/playlist/presentation.ts's
+  // Presentation interface for why.
+  kind: 'image' | 'video';
+  loop: boolean;
   layout: { type: LayoutType; slots: { assetId: string; position: SlotPosition }[] };
-  background: { type: 'mat'; colour: string };
+  background: { type: 'mat'; colour: string; texture: MatTexture | null };
   frame: { shadow: string; bevel: string };
   transition: { type: string; duration: number };
   assets: PresentationAsset[];
@@ -121,6 +169,8 @@ export interface ConfigInput {
   intervalSeconds?: number;
   playbackMode?: PlaybackMode;
   matMode?: MatMode;
+  displayMode?: DisplayMode;
+  loop?: boolean;
   disconnectedBehavior?: DisconnectedBehavior;
   cacheSize?: number;
   maxCollageImages?: number;

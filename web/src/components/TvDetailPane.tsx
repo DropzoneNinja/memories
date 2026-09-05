@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { api, ApiError } from '../api/client';
 import type {
   AlbumSummary,
   AssetLocation,
   Configuration,
+  MatTexture,
   Presentation,
   PresentationAsset,
   PresentationAssetMetadata,
@@ -19,9 +20,42 @@ import { LocationMap } from './LocationMap';
 // live without needing Phase 7's WebSocket push channel.
 const DETAIL_POLL_MS = 8_000;
 
+// Mirrors tv/src/render/PresentationRenderer.ts's MAT_TEXTURE_URLS and
+// ImageStage.ts's setMatColor/hexToRgba — bundled locally (public/mats/,
+// same asset files) rather than shared across packages (project
+// convention) so the dashboard's "Now Showing" preview actually looks
+// like what's on the TV instead of a flat-colour approximation.
+const MAT_TEXTURE_URLS: Record<MatTexture, string> = {
+  wood: '/mats/wood.jpg',
+  cork: '/mats/cork.jpg',
+  cotton: '/mats/cotton.jpg',
+};
+
+function hexToRgba(hex: string, alpha: number): string {
+  const normalized = hex.replace('#', '');
+  const full = normalized.length === 3 ? normalized.split('').map((c) => c + c).join('') : normalized;
+  const r = parseInt(full.slice(0, 2), 16) || 0;
+  const g = parseInt(full.slice(2, 4), 16) || 0;
+  const b = parseInt(full.slice(4, 6), 16) || 0;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function matBackgroundStyle(background: Presentation['background']): CSSProperties {
+  if (!background.texture) return { backgroundColor: background.colour };
+
+  const wash = hexToRgba(background.colour, 0.55);
+  return {
+    backgroundColor: background.colour,
+    backgroundImage: `linear-gradient(${wash}, ${wash}), url("${MAT_TEXTURE_URLS[background.texture]}")`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+  };
+}
+
 interface Props {
   tv: TvSummary;
   albums: AlbumSummary[];
+  albumsError: string | null;
   onConfigSaved: () => void;
 }
 
@@ -108,7 +142,7 @@ function resolveSelection(detail: TvDetail | null, selectedAssetId: string | nul
   return currentFirst ? { asset: currentFirst, fromNext: false } : null;
 }
 
-export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
+export function TvDetailPane({ tv, albums, albumsError, onConfigSaved }: Props) {
   const [detail, setDetail] = useState<TvDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   // null = no explicit pin, always show whichever photo is currently live
@@ -117,6 +151,10 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [location, setLocation] = useState<AssetLocation | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -141,6 +179,29 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
     onConfigSaved();
   }
 
+  function startRename(): void {
+    setRenameValue(tv.name ?? '');
+    setRenameError(null);
+    setRenaming(true);
+  }
+
+  async function handleRename(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    const name = renameValue.trim();
+    if (!name) return;
+    setRenameError(null);
+    setRenameSaving(true);
+    try {
+      await api.renameTv(tv.id, name);
+      setRenaming(false);
+      onConfigSaved(); // refreshes the TV list + this pane's own `tv` prop
+    } catch (err) {
+      setRenameError(err instanceof ApiError ? err.message : 'Rename failed');
+    } finally {
+      setRenameSaving(false);
+    }
+  }
+
   // Freshest online/paused come from this pane's own tighter poll once
   // it has landed; fall back to the list's slower-polled values until
   // then, so the transport controls aren't stuck disabled/guessing on
@@ -162,7 +223,7 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
     let cancelled = false;
     setLocationLoading(true);
     api
-      .getAssetLocation(selection.asset.id)
+      .getAssetLocation(tv.id, selection.asset.id)
       .then((result) => {
         if (!cancelled) setLocation(result);
       })
@@ -180,18 +241,42 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
   return (
     <div className="tv-detail-pane">
       <header className="tv-header">
-        <h2>{tv.name ?? 'Unnamed TV'}</h2>
+        {renaming ? (
+          <form className="tv-rename-form" onSubmit={handleRename}>
+            <input
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              autoFocus
+              maxLength={60}
+            />
+            <button type="submit" disabled={renameSaving || !renameValue.trim()}>
+              {renameSaving ? 'Saving…' : 'Save'}
+            </button>
+            <button type="button" className="link-button" onClick={() => setRenaming(false)} disabled={renameSaving}>
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <>
+            <h2>{tv.name ?? 'Unnamed TV'}</h2>
+            <button type="button" className="link-button" onClick={startRename} title="Rename this TV">
+              Rename
+            </button>
+          </>
+        )}
         <span className={`status-pill ${effectiveTv.online ? 'online' : 'offline'}`}>
           {effectiveTv.online ? 'Online' : 'Offline'}
         </span>
       </header>
+      {renameError && <p className="form-error">{renameError}</p>}
 
       {error && <p className="form-error">{error}</p>}
 
       <section className="now-showing">
         <h3>Now Showing</h3>
         {currentRows.length > 0 && detail?.current ? (
-          <div className="composition-frame" style={{ background: detail.current.background.colour }}>
+          <div className="composition-frame" style={matBackgroundStyle(detail.current.background)}>
             {currentRows.map((row, i) => (
               <div key={i} className="composition-row">
                 {row.map((asset) => (
@@ -203,6 +288,7 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
                     title="Show this photo's details and location"
                   >
                     <img src={api.resolveAssetUrl(asset.url)} alt="" />
+                    {detail?.current?.kind === 'video' && <span className="video-badge">▶ VIDEO</span>}
                   </button>
                 ))}
               </div>
@@ -255,6 +341,7 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
                         title="Show this photo's details and location"
                       >
                         <img src={api.resolveAssetUrl(asset.url)} alt="" />
+                        {item.kind === 'video' && <span className="video-badge">▶ VIDEO</span>}
                       </button>
                     ))}
                   </div>
@@ -266,7 +353,7 @@ export function TvDetailPane({ tv, albums, onConfigSaved }: Props) {
         </div>
       </section>
 
-      <ConfigForm tv={tv} albums={albums} onSaved={handleConfigSaved} />
+      <ConfigForm tv={tv} albums={albums} albumsError={albumsError} onSaved={handleConfigSaved} />
     </div>
   );
 }

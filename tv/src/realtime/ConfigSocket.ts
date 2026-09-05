@@ -10,6 +10,7 @@
 // `crypto.randomUUID` fallback convention in device/DeviceId.ts) or if the
 // connection can't be established.
 import { nextDelay, type BackoffOptions } from '../net/backoff.js';
+import { log } from '../log/Logger.js';
 
 // Minimal structural shape this class needs from a WebSocket — lets tests
 // inject a fake without depending on a real `WebSocket` global existing.
@@ -77,6 +78,7 @@ export class ConfigSocket {
     }
 
     socket.addEventListener('open', () => {
+      if (this.attempt > 0) log.info('config push channel reconnected', { afterAttempts: this.attempt });
       this.attempt = 0;
     });
     socket.addEventListener('close', () => this.retry());
@@ -101,6 +103,10 @@ export class ConfigSocket {
     if (this.stopped) return;
     this.attempt += 1;
     const delay = nextDelay(this.attempt, this.backoff);
+    // debug, not warn: the heartbeat is the guaranteed fallback (module
+    // comment above) — a disconnected push channel alone is not a problem
+    // worth surfacing on the diagnostics view's "last problem" line.
+    log.debug('config push channel reconnecting', { attempt: this.attempt, delayMs: delay });
     this.scheduleReconnect(() => this.connect(), delay);
   }
 

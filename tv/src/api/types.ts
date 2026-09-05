@@ -20,14 +20,30 @@ export interface PresentationSlot {
 export interface PresentationAsset {
   id: string;
   url: string;
+  // VIDEO presentations only — the streaming-proxy URL (routes/tvs.ts's
+  // new /assets/:assetId/video route). `url` stays the thumbnail proxy —
+  // Memories Web's preview thumbnail; the TV doesn't display it (an
+  // earlier version used it as <video poster>, but the swap from that
+  // still image to the decoded first frame looked like a jarring flash,
+  // see VideoStage.ts). PresentationRenderer's resolvePresentationUrls()
+  // deliberately never reads this field so a video stream never enters
+  // the Blob ImageCache.
+  videoUrl?: string;
   metadata: Record<string, unknown>;
 }
+
+export type MatTexture = 'wood' | 'cork' | 'cotton';
 
 export interface Presentation {
   presentationId: string;
   duration: number;
+  // Independent of layout.type — see api/src/playlist/presentation.ts's
+  // Presentation interface for why.
+  kind: 'image' | 'video';
+  // Only meaningful when kind === 'video'. See PresentationRenderer.render().
+  loop: boolean;
   layout: { type: LayoutType; slots: PresentationSlot[] };
-  background: { type: 'mat'; colour: string };
+  background: { type: 'mat'; colour: string; texture: MatTexture | null };
   frame: { shadow: string; bevel: string };
   transition: { type: string; duration: number };
   assets: PresentationAsset[];

@@ -2,6 +2,10 @@
 // intentionally not mocked. Skips gracefully if IMMICH_BASE_URL/
 // IMMICH_API_KEY aren't set, so it doesn't block anyone without
 // credentials configured; exercises the real thing whenever they are.
+// These two env vars are test-only now — the running app itself no
+// longer reads IMMICH_API_KEY (each user's key lives encrypted in
+// Postgres instead, see immich/config.ts), but they're still a convenient
+// way to point this specific test at a real instance from a dev machine.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import 'dotenv/config';
@@ -43,5 +47,26 @@ test('Immich integration', { skip }, async (t) => {
     const { body, contentType } = await client.fetchThumbnail(image.id, 'preview');
     assert.ok(contentType.startsWith('image/'), `expected an image content-type, got ${contentType}`);
     assert.ok(body.byteLength > 0);
+  });
+
+  // Verifies /assets/{id}/video/playback against the real server (post-
+  // Phase-8 addition) — this path is only a hypothesis from Immich's
+  // public OpenAPI spec (see ImmichClient.fetchVideoStream's comment), and
+  // this codebase has already found the real instance disagreeing with the
+  // spec once (top-level width/height). This is the actual pre-merge
+  // verification step, made durable as a regression test rather than a
+  // one-off manual check.
+  const video = assets.find((a) => a.type === 'VIDEO');
+  if (!video) {
+    t.diagnostic('no VIDEO-type asset in this album — skipping video-stream check');
+    return;
+  }
+
+  await t.test('streams video with Range-request support', async () => {
+    const res = await client.fetchVideoStream(video.id, 'bytes=0-1023');
+    assert.equal(res.status, 206, `expected a 206 Partial Content response, got ${res.status}`);
+    assert.ok(res.headers.get('content-range'), 'expected a content-range header on a ranged response');
+    const contentType = res.headers.get('content-type') ?? '';
+    assert.ok(contentType.startsWith('video/'), `expected a video content-type, got ${contentType}`);
   });
 });

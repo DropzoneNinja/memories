@@ -312,6 +312,24 @@ Immich asset id in a new `AssetColourAnalysis` table; confirmed against
 the real stack that a warm regeneration is ~10x faster and produces
 byte-identical mats.
 
+**Material mat textures, added later**: `WOOD` (upgraded from a flat
+colour) plus two new fixed modes, `CORK` and `COTTON`, layer a real
+material photo under the usual flat colour and vignette instead of a
+perfectly flat mat — cropped/softened from a user-supplied reference
+photo of woven material swatches (`RAW/matt-example-3.png`; the crops
+are an approximation of "cork/wood/cotton," not exact material photos —
+see `api/src/colour/matMode.ts`'s `resolveMatTexture`). The texture is a
+static app asset, never served by the API (`tv/public/mats/`,
+`web/public/mats/` — identical files, bundled per package per this
+project's usual "duplicate rather than share" convention), referenced on
+the wire by `Presentation.background.texture` as a bare key
+(`'wood'|'cork'|'cotton'|null`), so it renders correctly even if the API/
+Immich link is briefly down. Separately, the faux-3D framing in §5.4 got
+a second, broader box-shadow layer so a photo visibly casts a soft
+shadow onto the mat around it (`RAW/matt-example-1.png` & `-2.png`),
+instead of the mat staying perfectly flat under an otherwise-unshadowed
+photo.
+
 ### 5.4 Faux 3D Framing
 
 The mat can optionally carry a subtle physical-gallery appearance: a
@@ -439,6 +457,67 @@ as "nothing is or will ever be configured" — worth keeping in mind if
 Phase 7's disconnected-behaviour policies get layered on top of this same
 endpoint.
 
+### 5.11 Video Playback Mode (post-Phase-8 addition)
+
+Originally out of scope (§3/§14 as written before this addition) — video
+was explicitly requested afterward, so this crosses that off intentionally
+rather than by drift. A per-TV `Configuration.displayMode` (`IMAGES` |
+`VIDEO`) picks whether the queue is built from the *same* selected
+album's photos or its videos — never both, and never a separate album
+selector for video.
+
+- **Loop** (`Configuration.loop`, only meaningful in VIDEO mode): ON
+  replays the current video indefinitely (native `<video loop>`), never
+  auto-advancing. OFF plays through the album's videos in order
+  (honouring the existing SEQUENTIAL/SHUFFLE `playbackMode` and its
+  seeded-shuffle determinism), each once, advancing on the video's
+  `ended` event, wrapping to the first after the last — the same
+  wrap-around shape the photo queue already has.
+- **One video at a time, full-screen** — no collage/multi-up treatment,
+  unlike photos.
+- **No mat, no frame** (revised after real-device feedback — the first
+  version of this reused the photo mat treatment, which looked wrong):
+  video renders full-bleed, edge to edge, with no reserved margin/border
+  and no faux-3D shadow/bevel — a mat is a physical-print metaphor for a
+  *photo* and doesn't apply here, and reserving a border around a video
+  just wastes screen space. `object-fit: contain` still scales the video
+  to the largest size that fits the screen while preserving its original
+  aspect ratio (§3/§5.2's "no cropping, ever" still applies) — a fixed,
+  plain colour (`presentation.ts`'s `VIDEO_BACKGROUND_COLOUR`, no
+  vignette/texture) only ever shows as letterbox/pillarbox bars where the
+  aspect ratio doesn't match the screen's, same as any standard video
+  player. `matMode` is ignored entirely for video — there's no per-asset
+  dominant colour to derive a warm/cool/automatic mat from without
+  decoding video frames (out of scope), and there's no mat to apply it to
+  regardless.
+- **Advancing is event-driven, not timer-driven** — but a `duration`
+  value is still carried (Immich's real video length when parseable, else
+  a fixed watchdog ceiling, `VIDEO_WATCHDOG_CEILING_SECONDS`) and armed as
+  a fallback timer: if a stalled Range fetch or corrupt stream never
+  fires `ended`, the TV still advances rather than freezing indefinitely
+  (§5.10's "never wedge, never fail hard" applies to video too). Skipped
+  entirely when Loop is on.
+- **Streaming, not buffering**: the TV's `<video>` element points at a
+  new streaming proxy (`GET /api/v1/tvs/:tvId/assets/:assetId/video`)
+  that forwards `Range` requests and pipes Immich's `206`/`Content-Range`
+  response straight through — unlike the thumbnail proxy, which buffers
+  the whole response, a video is too large for that.
+- **No `<video poster>`** (user-reported, post-launch): the thumbnail
+  proxy's image is still fetched for Memories Web's "Now Showing"/"Next"
+  preview, but the TV itself no longer shows it — an earlier version set
+  it as the `<video>` element's poster, and the swap from that static
+  image to the decoded first frame once playback actually started read as
+  a jarring flash on real hardware. The TV now just shows its plain
+  background colour while the stream buffers, which is far less
+  noticeable.
+- **Muted, always** — this is an unattended ambient display, never meant
+  to have sound; muting also avoids autoplay being blocked by browser/
+  Tizen policy.
+- A TV mid-video when its config flips VIDEO→IMAGES (or the reverse)
+  keeps playing to a natural stopping point (the current item and its
+  back-buffer are never discarded on a config change) — only newly
+  fetched items pick up the new mode.
+
 ---
 
 ## 6. Responsibility Split
@@ -474,11 +553,34 @@ diagnostics view reachable but hidden during normal viewing.
 
 ## 7. Persistence
 
-**On the Memories API** (source of truth, in PostgreSQL): server URL/
-connection details for Immich, the Immich API key (secured — never
-logged, never exposed to the UI, never committed to source control),
-per-TV configuration and its version history, user accounts and
-permissions, TV registry/pairing state, and audit log.
+**On the Memories API** (source of truth, in PostgreSQL): the Immich
+server URL (`IMMICH_BASE_URL`, shared/env-configured — one self-hosted
+instance for the household), each user's own Immich API key (added later
+than the rest of this section — see the addendum below; secured: AES-256-
+GCM encrypted at rest, never logged, never returned by any API response,
+never committed to source control), per-TV configuration and its version
+history, user accounts and permissions, TV registry/pairing state, and
+audit log.
+
+**Addendum — per-user Immich credentials:** originally a single shared
+Immich API key lived in `.env` (§12's "single admin-capable user model"
+default). Superseded: each Memories Web user now connects their own key
+from a Settings panel in the dashboard (`PUT/DELETE /api/v1/me/immich`,
+`api/src/routes/settings.ts`), verified against Immich before being saved
+and stored encrypted (`api/src/immich/crypto.ts`, keyed by
+`ENCRYPTION_KEY`) on their `User` row — so each household member sees
+their own Immich albums, not one shared library. Saving a TV's
+configuration (`PUT /tvs/:id/config`) now also records *whose* Immich
+account backs that config version (`Configuration.immichOwnerId` — the
+saving user); queue generation and the TV-facing thumbnail proxy
+(`/api/v1/tvs/:tvId/assets/:assetId/thumbnail`, and the dashboard's
+`/api/v1/tvs/:tvId/assets/:assetId/location`) resolve credentials through
+that owner, not whoever happens to be logged in at request time — the TV
+itself has no login concept and fetches thumbnails long after the
+configuring session has ended. One consequence: a TV's Configuration rows
+that predate this change have `immichOwnerId: null`, so their cached
+queue's old thumbnail URLs stop resolving until someone connects an
+Immich account and re-saves that TV's configuration.
 
 **On each TV** (local, resilience-only — not the source of truth): the
 current configuration version and playlist it was last given, its rolling
@@ -676,12 +778,19 @@ application**, not a casual slideshow script.
     `exifInfo.exifImageWidth`/`exifImageHeight`. `api/src/immich/types.ts`
     reflects the real shape, not the spec's.
   - Albums can contain videos, not just images (`type: "VIDEO"` vs
-    `"IMAGE"`) — later phases (composition/queue generation) need to
-    filter to images only; video support is explicitly out of scope (§14).
+    `"IMAGE"`) — a per-TV `displayMode` config (post-Phase-8 addition,
+    §5.11) picks which type the queue is built from; a single
+    Configuration is always one mode or the other, never both.
   - Thumbnails: `GET /assets/{id}/thumbnail?size=preview|thumbnail`,
     proxied through the Memories API (`/api/v1/assets/:id/thumbnail`) so
     neither the TV nor Memories Web ever touch Immich directly or see its
     credentials (§6).
+  - Video playback: `GET /assets/{id}/video/playback` (§5.11) — matches
+    the public OpenAPI spec's `playAssetVideo` operation; verify this
+    against the real running instance (`ImmichClient.integration.test.ts`'s
+    video block) before relying on it further, the same way the
+    width/height and `/search/metadata` discrepancies below were found by
+    checking the real server rather than trusting the spec.
 - **Push channel**: WebSocket or SSE for TV notifications, with polling as
   a guaranteed fallback.
 - **Deployment**: Docker Compose only. Memories API, Memories Web, and
@@ -801,7 +910,20 @@ on them — revisit if any of these don't fit:
 
 - **Permission granularity**: defaulting to a single admin-capable user
   model for now (add roles later if a second household user needs
-  restricted access) rather than building roles up front.
+  restricted access) rather than building roles up front. Partially
+  revisited twice since: each user has their own Immich *credential* (§7
+  addendum), and there's now a real `isAdmin`/member distinction with
+  teeth — admins register new accounts and reset forgotten passwords
+  (`api/src/routes/admin.ts`, `web/src/components/AdminUserManagement.tsx`,
+  a "Settings" screen replacing the old Immich-only panel), a new account
+  starts with a generated temporary password and is forced to change it
+  before doing anything else (`User.mustChangePassword`, enforced both
+  server-side — every dashboard route 403s until it's cleared — and in the
+  UI). What's still genuinely missing is *per-TV* access scoping:
+  `TvPermission` exists in the schema but isn't wired to any route or UI,
+  and every logged-in user (admin or not) can see/edit every TV. "Own
+  Immich account," "admin vs. member," and "restricted to specific TVs"
+  are three separate axes; only the first two exist today.
 - **GPS/location EXIF**: originally defaulted to *never surfaced*,
   anywhere — **revisited in Phase 6**, which added a location map to the
   dashboard's per-TV detail pane (§4.2). The "TV shows none" half of that
@@ -860,8 +982,9 @@ Both remaining items from the previous revision are now settled:
 Multiple albums per TV, favourites, Immich search, people/location-based
 collections, date-based/"on this day" collections, automatic daily/weekly
 rotation, weather- or ambient-light-aware presentation, time-of-day mat
-styles, video/Live Photos support, custom mat/frame presets, and
-user-selectable composition rules.
+styles, Live Photos support, custom mat/frame presets, and user-selectable
+composition rules. (Video playback itself shipped post-Phase-8 — see
+§5.11 — Live Photos specifically remains unbuilt.)
 
 ---
 

@@ -83,6 +83,45 @@ test('a 404 is never retried — fails immediately after a single attempt', asyn
   assert.equal(calls, 1);
 });
 
+test('fetchVideoStream forwards the Range header and returns the response with its body unconsumed', async () => {
+  let capturedHeaders: HeadersInit | undefined;
+  await withMockedFetch(
+    async (_url, init) => {
+      capturedHeaders = init?.headers;
+      return new Response('fake video bytes', {
+        status: 206,
+        headers: { 'content-type': 'video/mp4', 'content-range': 'bytes 0-15/1000' },
+      });
+    },
+    async () => {
+      const client = new ImmichClient({ baseUrl: 'http://immich.test', apiKey: 'key' });
+      const res = await client.fetchVideoStream('asset-1', 'bytes=0-15');
+      assert.equal(res.status, 206);
+      assert.equal(res.headers.get('content-range'), 'bytes 0-15/1000');
+      // Body must still be readable by the caller (routes/tvs.ts pipes it
+      // straight through) — fetchVideoStream must never consume it itself.
+      const body = await res.text();
+      assert.equal(body, 'fake video bytes');
+    },
+  );
+  assert.equal((capturedHeaders as Record<string, string>)?.Range, 'bytes=0-15');
+});
+
+test('fetchVideoStream omits the Range header when none is given', async () => {
+  let capturedHeaders: HeadersInit | undefined;
+  await withMockedFetch(
+    async (_url, init) => {
+      capturedHeaders = init?.headers;
+      return new Response('ok', { status: 200 });
+    },
+    async () => {
+      const client = new ImmichClient({ baseUrl: 'http://immich.test', apiKey: 'key' });
+      await client.fetchVideoStream('asset-1');
+    },
+  );
+  assert.equal((capturedHeaders as Record<string, string> | undefined)?.Range, undefined);
+});
+
 test('a persistent network failure throws after exhausting all attempts', async () => {
   let calls = 0;
   await withMockedFetch(

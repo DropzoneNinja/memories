@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveMatColour } from './matMode.js';
+import { resolveMatColour, resolveMatTexture } from './matMode.js';
 import { generateMatCandidates } from './matCandidates.js';
 import { selectBestMat } from './matScoring.js';
 import type { Oklch } from './oklch.js';
@@ -42,9 +42,18 @@ test('WARM and COOL return fixed-hue neutrals regardless of the photo', () => {
   assert.notDeepEqual(warmA, coolA);
 });
 
-test('WHITE, BLACK, and WOOD are fixed and ignore the photo entirely', () => {
-  for (const mode of ['WHITE', 'BLACK', 'WOOD'] as const) {
+test('WHITE, BLACK, WOOD, CORK, and COTTON are fixed and ignore the photo entirely', () => {
+  for (const mode of ['WHITE', 'BLACK', 'WOOD', 'CORK', 'COTTON'] as const) {
     assert.deepEqual(resolveMatColour(mode, photoA), resolveMatColour(mode, photoB));
+  }
+});
+
+test('resolveMatTexture returns a texture only for the three material modes', () => {
+  assert.equal(resolveMatTexture('WOOD'), 'wood');
+  assert.equal(resolveMatTexture('CORK'), 'cork');
+  assert.equal(resolveMatTexture('COTTON'), 'cotton');
+  for (const mode of ['AUTOMATIC', 'NEUTRAL', 'WARM', 'COOL', 'DARK', 'LIGHT', 'COMPLEMENTARY', 'ANALOGOUS', 'WHITE', 'BLACK'] as const) {
+    assert.equal(resolveMatTexture(mode), null);
   }
 });
 

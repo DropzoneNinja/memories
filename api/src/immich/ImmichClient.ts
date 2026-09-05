@@ -1,3 +1,4 @@
+import { log } from '../log.js';
 import type { ImmichAlbum, ImmichAsset, ImmichThumbnailSize } from './types.js';
 
 export interface ImmichClientOptions {
@@ -48,7 +49,11 @@ export class ImmichClient {
       } catch (err) {
         // Network-level failure (DNS, connection refused, timeout) —
         // retryable, same as a 5xx.
-        if (attempt >= MAX_ATTEMPTS) throw err;
+        if (attempt >= MAX_ATTEMPTS) {
+          log.error({ path, attempt, err }, 'immich request failed (network)');
+          throw err;
+        }
+        log.warn({ path, attempt }, 'immich request failed (network) — retrying');
         await this.delay(RETRY_DELAYS_MS[attempt - 1]);
         continue;
       }
@@ -56,6 +61,7 @@ export class ImmichClient {
       if (res.ok) return res;
 
       if (res.status >= 500 && attempt < MAX_ATTEMPTS) {
+        log.warn({ path, attempt, status: res.status }, 'immich request failed (5xx) — retrying');
         await this.delay(RETRY_DELAYS_MS[attempt - 1]);
         continue;
       }
@@ -64,6 +70,7 @@ export class ImmichClient {
       // this — Immich error bodies don't echo the API key, but keep the
       // habit (PROJECT.md §9.15).
       const body = await res.text().catch(() => '');
+      log.error({ path, attempt, status: res.status }, 'immich request failed');
       throw new Error(`Immich API ${path} failed: ${res.status} ${res.statusText} ${body}`);
     }
   }
@@ -127,5 +134,19 @@ export class ImmichClient {
     const contentType = res.headers.get('content-type') ?? 'application/octet-stream';
     const body = await res.arrayBuffer();
     return { body, contentType };
+  }
+
+  // Streams video bytes rather than buffering them (unlike fetchThumbnail)
+  // — a video can be far larger than a thumbnail, and the TV-facing proxy
+  // (routes/tvs.ts) needs to forward Range requests/206 responses for
+  // native browser seeking/buffering rather than holding a whole file in
+  // memory. Returns the raw Response so the caller can read status/headers
+  // and pipe `.body` directly. `/assets/{id}/video/playback` matches
+  // Immich's public OpenAPI spec but is NOT yet verified against the real
+  // running instance — see ImmichClient.integration.test.ts's video block,
+  // and PROJECT.md §10's precedent of the real server disagreeing with the
+  // spec (width/height, /search/metadata).
+  async fetchVideoStream(assetId: string, rangeHeader?: string): Promise<Response> {
+    return this.request(`/assets/${assetId}/video/playback`, rangeHeader ? { headers: { Range: rangeHeader } } : {});
   }
 }

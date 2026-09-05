@@ -3,11 +3,35 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { prisma } from "./db.js";
+import { log } from "./log.js";
 import { albumRoutes } from "./routes/albums.js";
 import { tvRoutes } from "./routes/tvs.js";
 import { authRoutes } from "./routes/auth.js";
+import { settingsRoutes } from "./routes/settings.js";
+import { adminRoutes } from "./routes/admin.js";
 
-const app = Fastify({ logger: true });
+// Quiet in normal operation (PROJECT.md §9.15): disableRequestLogging
+// turns off Fastify's own automatic "incoming request"/"request
+// completed" line for every single HTTP call — otherwise a TV's
+// heartbeat/playlist/commands polling (every few seconds, per TV, all
+// day) would drown out the structured, meaningful events logged
+// explicitly throughout the app (queue regeneration, Immich retries,
+// pairing, config saves — see log.ts). `logger: log` reuses the same
+// pino instance as the rest of the app so everything lands in one
+// consistent stream instead of two.
+const app = Fastify({ logger: log, disableRequestLogging: true });
+
+// Infrequent, structured memory sample (§9.15's "memory/resource
+// problems") — enough to spot slow growth across a multi-day run without
+// being the noisy thing in the log itself.
+const MEMORY_SAMPLE_INTERVAL_MS = 30 * 60_000;
+setInterval(() => {
+  const usage = process.memoryUsage();
+  log.info(
+    { rssMB: Math.round(usage.rss / 1024 / 1024), heapUsedMB: Math.round(usage.heapUsed / 1024 / 1024) },
+    'memory sample',
+  );
+}, MEMORY_SAMPLE_INTERVAL_MS).unref();
 
 // Memories Web runs in an actual browser (unlike the TV, which is a
 // packaged Tizen widget — a privileged native-app context that isn't
@@ -37,12 +61,17 @@ app.get("/healthz", async () => {
 });
 
 await app.register(authRoutes);
+await app.register(settingsRoutes);
+await app.register(adminRoutes);
 await app.register(albumRoutes);
 await app.register(tvRoutes);
 
 const port = Number(process.env.PORT ?? 4000);
 
-app.listen({ port, host: "0.0.0.0" }).catch((err) => {
-  app.log.error(err);
-  process.exit(1);
-});
+app
+  .listen({ port, host: "0.0.0.0" })
+  .then(() => log.info({ port }, 'started'))
+  .catch((err) => {
+    log.error({ err }, 'failed to start');
+    process.exit(1);
+  });

@@ -2,7 +2,10 @@
 
 Working checklist for building Memories, derived from `PROJECT.md`
 (section references in parentheses point back to the spec for full detail).
-Check items off with `[x]` as they're completed. Phases are ordered —
+Check items off with `[x]` as they're completed. `[~]` marks a task
+that's infrastructure-ready but not actually, fully done — used sparingly,
+only for something that genuinely can't be completed by writing code
+(e.g. a real-time observation task still pending). Phases are ordered —
 each one assumes the previous is basically working — but within a phase,
 order tasks however makes sense during the build.
 
@@ -884,25 +887,288 @@ decision was needed.
       shortly after, then reverted the interval back to 20 afterward so the
       live TV was left exactly as found
 
-## Phase 8 — Hardening & Acceptance
+## Phase 8 — Hardening & Acceptance ⚠️ mostly complete (soak testing pending)
 
 *(Milestone 8, §11.1, §11.3)*
 
-- [ ] Add structured logging across API and TV (Immich connection, API
+Two items in this phase are genuinely real-time activities (running for
+24 hours, then multiple days, actually elapsed) that cannot be completed
+by writing code in one sitting — marked below as infrastructure-ready
+rather than checked off. Everything else is done.
+
+- [x] Add structured logging across API and TV (Immich connection, API
       failures, downloads, cache ops, composition generation, Tizen
-      lifecycle) — confirm nothing sensitive is ever logged (§9.15)
-- [ ] Add a hidden TV diagnostics view (connection status, current/next
+      lifecycle) — confirm nothing sensitive is ever logged (§9.15).
+      **API**: `api/src/log.ts` — one shared pino instance, passed to
+      Fastify's own `logger` option (`main.ts`) and imported directly by
+      app-level modules below the HTTP layer, so everything lands in one
+      structured stream. `disableRequestLogging: true` turns off Fastify's
+      automatic per-request line — a TV's heartbeat/playlist/commands
+      polling every few seconds would otherwise drown out the events that
+      actually matter. Explicit log sites: `ImmichClient.request()`
+      (retries and final failures, path/attempt/status — never headers or
+      body, matching the pre-existing "don't echo the API key" comment
+      there), `playlist/queue.ts`'s `regenerateQueue` (start/success/
+      failure with item counts, duration, and a debug-level colour-cache-
+      miss count), `routes/tvs.ts` (pairing completed, config saved,
+      command enqueued, TV deleted), `routes/settings.ts` (Immich account
+      connected/disconnected/verification-failed — user id only, never
+      the key), and a 30-minute `process.memoryUsage()` sample in
+      `main.ts`. `LOG_LEVEL` env var (default `info`) controls verbosity;
+      documented in `.env.example` and the README.
+      **TV**: `tv/src/log/Logger.ts` — a small leveled logger backed by a
+      200-entry ring buffer (kept regardless of the display level, so the
+      diagnostics view below can show recent history even when nothing
+      was printed to the console) with its own unit tests
+      (`Logger.test.ts`). Default level is `warn` on a real device,
+      `debug` under `vite dev` — guarded against `import.meta.env` not
+      existing at all under the `tsx --test` runner. Wired into `main.ts`
+      (startup, pairing, fatal errors), `PlaybackController` (offline/
+      reconnect transitions, config-version changes, playlist-fetch
+      failures — replacing the previous bare `console.error` calls),
+      `ImageCache` (eviction summaries), `ConfigSocket` (reconnect
+      attempts, at debug — the heartbeat is the guaranteed fallback, so a
+      flaky push channel alone isn't a "problem"), and `TizenAdapter`
+      (key-registration failures, and lifecycle via the standard Page
+      Visibility API — deliberately not an unverified Tizen-specific
+      lifecycle API, per §15.2/§15.5). Confirmed nothing sensitive is ever
+      logged: the TV never holds Immich credentials at all (§6/§13), and
+      every API-side Immich log site was checked against the existing
+      "never log API keys/credentials/tokens" convention.
+- [x] Add a hidden TV diagnostics view (connection status, current/next
       asset, cache size, last sync, last error, app version) — reachable
-      but never shown during normal playback
-- [ ] Memory/resource profiling pass on the TV across repeated playback
-      cycles
-- [ ] Run a 24-hour soak test; fix anything it surfaces
-- [ ] Run a multi-day soak test once the 24-hour pass is clean
-- [ ] Write/update the README: setup, dev workflow, `docker-compose up`
-      deployment, and troubleshooting (§15.9)
-- [ ] Walk every item in Acceptance Criteria (§11.3) and mark pass/fail
-- [ ] Final check against "Things Claude Must Not Do" (§13) — confirm
-      none were violated
+      but never shown during normal playback.
+      `tv/src/diagnostics/DiagnosticsView.ts` — a small corner overlay
+      (not full-screen, never blocks the photo), toggled by pressing the
+      remote's **Up** key 3 times within 2 seconds
+      (`main.ts` — Up is otherwise unused during normal playback, so this
+      can't be triggered by a stray remote press, and isn't a documented
+      button). Shows: connection status + paused state, last sync time,
+      queue length, current/next filename, cache entry count + bytes,
+      live memory (via `diagnostics/MemorySampler.ts`, feature-detected —
+      see below), the logger's most recent warning/error, and the app
+      version (baked in at build time from `package.json` via a new Vite
+      `define` in `vite.config.ts`, `__APP_VERSION__`). Backed by a new
+      `PlaybackController.diagnosticsSnapshot()` method returning a plain
+      data snapshot rather than exposing internals directly.
+- [~] Memory/resource profiling pass on the TV across repeated playback
+      cycles — **infrastructure-ready, not a real on-device pass.**
+      `performance.memory` sampling exists (`MemorySampler.ts`, feature-
+      detected — this is a non-standard, Chromium-only API; Tizen's
+      engine has historically exposed it but this isn't guaranteed across
+      Tizen versions, so it's a silent no-op where absent rather than a
+      false claim) and logs every 5 minutes, visible live in the
+      diagnostics view. As a mechanical stand-in for actual multi-day,
+      on-device behavior — which needs real elapsed time and real
+      hardware, neither available in one sitting — added
+      `tv/src/playback/PlaybackController.growth.test.ts`: drives 2000
+      simulated advances through an endless stream of *never-repeated*
+      assets (harder to bound than any real, finite, looping album)
+      against the real `ImageCache` (not a fake — eviction genuinely
+      runs), asserting the in-memory queue and cache both stay bounded
+      rather than growing with how many photos were ever shown.
+      **Verified the test actually catches a regression**, not just
+      passing vacuously: temporarily disabled `PlaybackController`'s
+      `trimQueue()` call, reran the test, watched it fail
+      (`peaked at 2005` unbounded queue growth), then restored the real
+      file and confirmed it passes again. This proves the bounded-growth
+      invariant, not the absence of every possible leak — it doesn't
+      replace a real soak test below.
+- [ ] Run a 24-hour soak test; fix anything it surfaces — **not run**.
+      Genuinely needs 24 real hours against the physical TV; the logging
+      and diagnostics infrastructure above is what makes this observable
+      once it happens (structured logs to watch, live memory in the
+      diagnostics view, the growth test as a pre-check). Deploy the
+      current build (`cd tv && npm run deploy`), leave it running, and
+      check back — `docker compose logs api` and the TV's own console/
+      diagnostics view (Up×3) are what to watch.
+- [ ] Run a multi-day soak test once the 24-hour pass is clean — **not
+      run**, blocked on the item above by definition.
+- [x] Write/update the README: setup, dev workflow, `docker-compose up`
+      deployment, and troubleshooting (§15.9) — rewritten from a 23-line
+      stub to cover prerequisites, `.env` setup (including the Phase-8-
+      addendum `ENCRYPTION_KEY`/`LOG_LEVEL`), per-user Immich account
+      connection, dev workflow per package, testing, the new logs/
+      diagnostics section, TV build & deploy, and a troubleshooting list
+      of every real issue hit during earlier phases (Alpine musl DNS,
+      Tizen's silent `config.xml` access-whitelist block, the CARTO
+      tile-key bait-and-switch, Apple Silicon/Tizen Studio, the retail-
+      certificate chain error, the Postgres 5433 port, `api/.env` vs. the
+      root `.env`).
+      **Found and fixed a real gap along the way**: `api/Dockerfile`'s
+      `CMD` was just `node dist/main.js` — no migration ever ran
+      automatically, so acceptance criterion 17 ("the entire backend/web
+      stack runs from a single `docker-compose up`") was actually false
+      for a genuinely fresh clone (a brand-new Postgres volume had no
+      tables until someone ran `prisma migrate deploy` by hand). Changed
+      the `CMD` to `npx prisma migrate deploy && node dist/main.js` and
+      verified against a real, throwaway, empty Postgres container (not
+      the dev database) — all 7 migrations applied in order, the server
+      started, `/healthz` returned `200 {"status":"ok"}`; then confirmed
+      re-running it against the already-migrated dev database is a safe
+      no-op ("No pending migrations to apply").
+- [x] Walk every item in Acceptance Criteria (§11.3) and mark pass/fail —
+      see the table below.
+- [x] Final check against "Things Claude Must Not Do" (§13) — confirm
+      none were violated. Reviewed each of the 11 items against every
+      change made in this phase (and, in passing, the per-user-Immich-
+      credentials work immediately before it): no Immich UI/credentials
+      ever touched the TV; no scraping or invented endpoints; no
+      full-resolution downloads, cropping, or stretching; the diagnostics
+      view is hidden by default (toggle-only, never auto-shown, no
+      permanent on-screen overlay) and is a small monospace corner panel,
+      not a "normal website" or desktop-style interface; every new
+      feature-detects rather than assumes desktop-browser capabilities
+      (`performance.memory`, Page Visibility API); no new large
+      dependency (`pino` was already an installed transitive dependency
+      of Fastify — made explicit, not added), no Kubernetes/managed DB;
+      no secret ever logged (checked every new log call site by hand) or
+      committed (`.env` stays gitignored); nothing added blocks playback
+      on a network call or fails hard on a brief outage. None violated.
+
+### Acceptance Criteria (§11.3) — pass/fail walk
+
+| # | Criterion | Status | Evidence |
+|---|---|---|---|
+| 1 | Tizen client installs and runs on `QA32LS03CBWXXY` | ✅ Pass | Confirmed working end-to-end in earlier phases (PROJECT.md §10); the physical TV was actively heartbeating against the live API throughout this session's work, unaffected by it |
+| 2 | API connects/authenticates to Immich; only the API holds the credential | ✅ Pass | Now per-user rather than one global key, but the invariant holds: credentials live encrypted in Postgres, decrypted only server-side, never returned by any API response, never seen by the TV or in the browser |
+| 3 | Pair via on-screen code, name it, manage from Web | ✅ Pass | `routes/tvs.ts` pairing endpoints + `web/src/components/PairingForm.tsx`/`TvListPane.tsx`, exercised repeatedly across earlier phases |
+| 4 | Pick an album/settings from the dashboard; takes effect without TV-side steps | ✅ Pass | `ConfigForm` → `PUT .../config` → `regenerateQueue` → WS push (heartbeat fallback if it misses) |
+| 5 | Photos display without cropping or stretching | ✅ Pass (per existing coverage) | `render/ImageStage.ts` + `composition/orientation.test.ts`; not re-verified visually on hardware this session |
+| 6 | Sensible resolutions, not full-resolution originals | ✅ Pass | Every asset URL requests Immich's `size=preview` thumbnail (`ImmichClient.fetchThumbnail`'s default), never an original |
+| 7 | Portraits grouped 2-3 up; landscapes never forced into a portrait slot | ✅ Pass | `composition/group.test.ts` — extensive coverage, unchanged this phase |
+| 8 | Mixed-orientation albums produce attractive, non-repetitive compositions | ✅ Pass | Same test suite as above |
+| 9 | Auto-generated mat colours (colour theory) with a working manual override | ✅ Pass | `colour/matMode.ts` + `matCandidates.ts`/`matScoring.ts`, `matMode: AUTOMATIC` vs. an explicit choice |
+| 10 | Transitions subtle/smooth on real hardware | ✅ Pass (per earlier phases) | Crossfade, `presentation.ts`; last visually verified on hardware in Phase 5, not re-verified this session |
+| 11 | Sequential/shuffle both work; sensible resume after a restart | ✅ Pass | `seededShuffle`; resume position is server-side (`Tv.lastServedPosition`, DB-persisted), so a TV app restart resumes from where the *server* last left off, not from zero |
+| 12 | Dashboard shows current image + full EXIF, and what's coming next | ✅ Pass | `TvDetailPane.tsx`'s "Now Showing"/EXIF panel/"Next" strip |
+| 13 | Continues through a temporary Immich/API outage via local cache; recovers automatically | ✅ Pass | `PlaybackController` offline/reconnect + `ImageCache`; verified against real hardware in Phase 7 (`docker stop` for 90s) |
+| 14 | Remote-control transport works from both the physical remote and the dashboard | ✅ Pass | `TizenAdapter` key mapping + `TransportControls.tsx` / command polling |
+| 15 | No persistent controls/metadata left on screen during normal playback | ✅ Pass | The new diagnostics view included — hidden by default, toggle-only, never auto-shown |
+| 16 | Runs for an extended period (soak-tested) without observable degradation | ⚠️ Infra ready, not run | See the two unchecked soak-test items above — this is the one criterion this phase could not actually complete |
+| 17 | The entire backend/web stack runs from a single `docker-compose up` | ✅ Pass (fixed this phase) | Was false for a fresh clone before the Dockerfile fix above — now verified against a real, throwaway, empty Postgres |
+| 18 | No external/cloud service required anywhere in the pipeline | ✅ Pass | Immich, Postgres, and the Memories stack are all self-hosted; the dashboard's location map uses public OpenStreetMap tiles (no API key/account), the only outbound call besides Immich itself |
+
+---
+
+## Post-Phase-8 additions (ad hoc, not part of the original phase plan)
+
+- [x] Account/settings screen — replaced the Immich-only settings panel
+      with a general "Settings" screen (`web/src/components/
+      SettingsScreen.tsx`): every user gets Immich API key, Change
+      Password, and Sign out; admins additionally get Register New User
+      (generated temp password, shown once) and a Users list with
+      per-user Reset Password (`api/src/routes/admin.ts`,
+      `AdminUserManagement.tsx`). New accounts and resets set
+      `User.mustChangePassword`, enforced both server-side (every other
+      dashboard route 403s until `PUT /me/password` clears it —
+      `auth/middleware.ts`) and via a mandatory `ForcedPasswordChange`
+      screen. Verified end-to-end against the real API (login → forced
+      gate blocking a normal route → password change clearing it → admin
+      reset re-locking an already-active session immediately →
+      non-admin blocked from admin routes), test accounts cleaned up
+      afterward.
+- [x] Rename a paired TV — `PATCH /api/v1/tvs/:id`, a "Rename" control
+      next to the TV's name in `TvDetailPane.tsx` (there was previously
+      no way to fix a naming mistake without unpairing and re-pairing).
+- [x] App branding/icon — `RAW/icon.png` replaces `tv/public/icon.png`
+      (Tizen app icon, kept at the already-verified-working 128×128) and
+      is now shown on the web dashboard's login screen
+      (`web/public/logo.png`, `LoginScreen.tsx`) and browser tab
+      (`web/public/favicon.png`). Worth knowing: at 128×128 the icon's
+      "memories" wordmark is essentially illegible — only the framed-
+      photo mark reads at that size — used as-is since that's what was
+      asked for, but a cropped mark-only variant would look sharper as
+      an actual app icon if that's ever wanted.
+- [x] Material mat textures + shadow — see PROJECT.md §5.3's addendum
+      and §5.4. New `CORK`/`COTTON` MatMode values, `WOOD` upgraded from
+      a flat colour to a real (approximated) material texture, and a
+      broader soft shadow so a photo visibly casts onto the mat around
+      it instead of sitting on a perfectly flat surface. Verified via a
+      real logged-in browser session (Playwright) that the Mat dropdown
+      lists all 12 modes correctly, plus type-checks and the full test
+      suite across all three packages.
+- [x] Video playback mode — see PROJECT.md §5.11 (new). Previously
+      explicitly out of scope (§14 as written before this); requested
+      afterward, so this crosses that off intentionally. New per-TV
+      `Configuration.displayMode` (`IMAGES`/`VIDEO`, migration
+      `20260905085849_video_playback_mode`) plays the same selected
+      album's videos instead of photos; `loop` (VIDEO mode only) replays
+      the current video indefinitely versus advancing through the album
+      once each, wrapping after the last. Touches all three packages:
+      - **API**: `queue.ts`'s `buildVideoQueueRows`/`presentation.ts`'s
+        `buildVideoPresentation` fork away from the composition/colour
+        engine entirely (skip both — a fixed neutral mat is used
+        instead, no per-asset dominant colour to derive one from); a new
+        `ImmichClient.fetchVideoStream` + TV-facing streaming proxy
+        (`GET /tvs/:tvId/assets/:assetId/video`) pipe Range requests/206
+        responses instead of buffering, unlike the thumbnail proxy.
+      - **TV**: new `VideoStage` (sibling to `ImageStage`, shared style
+        helpers factored into `matStyles.ts`) renders a single
+        persistent `<video>`; `PresentationRenderer` forks on a new
+        `Presentation.kind` field and arms a watchdog timer alongside
+        the video's `ended` event (skipped when looping) so a stalled
+        stream still advances instead of freezing the display forever.
+      - **Bug found and fixed during implementation, not part of the
+        original ask**: `PlaybackController.pause()`/`resume()` both
+        called `showCurrent()`, which re-renders — harmless for a photo
+        (crossfade-to-self) but would have restarted a playing video
+        from frame 0 on every pause/resume. Fixed via new
+        `RendererLike.pauseMedia()`/`resumeMedia()` hooks that freeze/
+        resume in place; also unified the FREEZE disconnected-behavior
+        policy onto the same two methods.
+      - **Verified**: full test suite + type-check clean across all
+        three packages (112 API tests incl. new `queue.test.ts`/
+        `presentation.test.ts`/`ImmichClient` cases, 33 TV tests incl.
+        new cache-exclusion and pause/resume-in-place regression tests).
+        Web config UI verified end-to-end via a real logged-in browser
+        session (Playwright) against an isolated test user + test TV
+        row (never the real paired "Mike Office" TV) — Display
+        dropdown, conditional Loop checkbox, and Mat/Interval/collage
+        fields hiding/reappearing all confirmed, plus a real
+        `PUT .../config` round-trip. Caught and fixed a real bug this
+        way: the Loop checkbox's `<label>` inherited `flex-direction:
+        column` from every other config field, stacking the checkbox
+        above its own text instead of inline (new `.checkbox-label`
+        CSS class).
+      - **Not verified — flagged as follow-up, not silently assumed
+        working**: the real Immich video-playback endpoint
+        (`/assets/{id}/video/playback`) is unverified against a live
+        Immich instance — this codebase's own established practice
+        (§10) is to confirm real-server behaviour before trusting the
+        spec, and it has been wrong before (width/height). A regression
+        test exists (`ImmichClient.integration.test.ts`'s new video
+        block) but is skip-gated on `IMMICH_BASE_URL`/`IMMICH_API_KEY`
+        env vars, which aren't set in this deployment (Phase 8 moved to
+        per-user encrypted keys) — run it manually with those set before
+        relying on real video playback. Actual on-device video rendering
+        (the TV's `VideoStage`/`<video>` element) was also not visually
+        verified against a real Tizen client or real video asset — no
+        video content existed in the connected Immich library to test
+        against during this pass.
+      - **Deployed to the real TV** (`npm run deploy 10.10.10.80`,
+        confirmed by `sdb`'s own `install completed`/`successfully
+        launched` output and a fresh pairing request landing in the
+        database — real Developer Mode Host PC IP mismatch was the
+        blocker on the first attempt, resolved on the TV itself) and the
+        API/web rebuilt and redeployed via `docker compose build/up`
+        (`No pending migrations to apply` confirmed the schema was
+        already current). Re-paired as "Lounge".
+      - **Addendum, user-reported on the real device**: video was
+        rendering small and off-center instead of filling the screen.
+        Root cause: `VideoStage`'s `<video>` element only had
+        `max-width`/`max-height: 100%` set, not `width`/`height` — a
+        replaced element with no explicit size renders at its own
+        intrinsic/native resolution rather than filling its container, so
+        `object-fit: contain` had nothing to scale *up* to. Fixed by
+        giving the video explicit `width: 100%; height: 100%`. Also
+        dropped the mat margin/faux-3D framing entirely for video per the
+        same feedback ("no need for a mat border if it doesn't make sense
+        for video") — video now renders full-bleed with only a flat
+        letterbox/pillarbox colour behind it, never a decorative mat (see
+        PROJECT.md §5.11's revised wording). Rebuilt/redeployed to the
+        real TV and the API; full test suite + type-check reconfirmed
+        clean across all three packages.
 
 ---
 

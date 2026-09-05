@@ -5,11 +5,26 @@ import { MemoriesApiClient } from './api/MemoriesApiClient';
 import { PairingScreen } from './pairing/PairingScreen';
 import { PlaybackController } from './playback/PlaybackController';
 import { ConfigSocket, wsUrlFor } from './realtime/ConfigSocket';
+import { DiagnosticsView } from './diagnostics/DiagnosticsView';
+import { startMemorySampling } from './diagnostics/MemorySampler';
+import { log } from './log/Logger';
 import type { RemoteCommand } from './api/types';
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const COMMAND_POLL_INTERVAL_MS = 5_000;
 const PAIRING_RETRY_MS = 4_000;
+// Quiet by design (§9.15) — frequent enough to catch slow growth across a
+// multi-day soak, infrequent enough to never be the noisy thing in the log.
+const MEMORY_SAMPLE_INTERVAL_MS = 5 * 60_000;
+// Hidden diagnostics toggle: N presses of a key nothing else uses during
+// normal playback (Up — see the remote.onKey switch below, no case for it)
+// within a short window. Not a single press, so it can't be triggered by a
+// stray remote bump; not a documented remote button, so it stays "reachable
+// but never shown during normal playback" (§6) rather than a normal app
+// feature.
+const DIAGNOSTICS_CHORD_KEY: RemoteKey = 'Up';
+const DIAGNOSTICS_CHORD_COUNT = 3;
+const DIAGNOSTICS_CHORD_WINDOW_MS = 2000;
 
 const stage = document.getElementById('stage')!;
 const deviceId = getOrCreateDeviceId();
@@ -17,7 +32,8 @@ const apiBaseUrl = (import.meta.env.VITE_MEMORIES_API_URL as string | undefined)
 const api = new MemoriesApiClient(apiBaseUrl);
 const screenSize = getScreenSize();
 
-console.log(`Device ${deviceId} — screen ${screenSize.width}x${screenSize.height} — API ${apiBaseUrl}`);
+log.info('startup', { deviceId, screen: `${screenSize.width}x${screenSize.height}`, apiBaseUrl });
+startMemorySampling(MEMORY_SAMPLE_INTERVAL_MS);
 
 const remote = new TizenAdapter();
 remote.init();
@@ -40,7 +56,7 @@ async function waitForPairing(): Promise<void> {
         pairingScreen.setCode(result.pairingCode);
       }
     } catch (err) {
-      console.error('Pairing request failed', err);
+      log.warn('pairing request failed', { message: String(err) });
     }
     await sleep(PAIRING_RETRY_MS);
   }
@@ -69,7 +85,24 @@ async function main(): Promise<void> {
   const controller = new PlaybackController(api, deviceId, stage);
   await controller.start();
 
+  const diagnostics = new DiagnosticsView(stage, {
+    deviceId,
+    apiBaseUrl,
+    getSnapshot: () => controller.diagnosticsSnapshot(),
+  });
+  let chordPresses: number[] = [];
+
   remote.onKey((key: RemoteKey) => {
+    if (key === DIAGNOSTICS_CHORD_KEY) {
+      const now = Date.now();
+      chordPresses = [...chordPresses.filter((t) => now - t < DIAGNOSTICS_CHORD_WINDOW_MS), now];
+      if (chordPresses.length >= DIAGNOSTICS_CHORD_COUNT) {
+        chordPresses = [];
+        diagnostics.toggle();
+      }
+      return;
+    }
+
     switch (key) {
       case 'Left':
       case 'Previous':
@@ -113,4 +146,4 @@ async function main(): Promise<void> {
   }, COMMAND_POLL_INTERVAL_MS);
 }
 
-main().catch((err) => console.error('Fatal error', err));
+main().catch((err) => log.error('fatal error', { message: String(err) }));

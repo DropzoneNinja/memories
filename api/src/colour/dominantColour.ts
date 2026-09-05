@@ -3,6 +3,7 @@
 // never touches a full-resolution original per §9.8) rather than a URL,
 // so it's independent of how the caller fetched them.
 import sharp from 'sharp';
+import { log } from '../log.js';
 import type { Oklab, Oklch } from './oklch.js';
 import { oklabToOklch, rgbToOklab } from './oklch.js';
 
@@ -104,7 +105,7 @@ export async function extractDominantColour(imageBytes: Buffer): Promise<Oklch> 
     const dominant = clusters.reduce((best, c) => (c.count > best.count ? c : best), clusters[0]);
     return oklabToOklch(dominant.centroid);
   } catch (err) {
-    console.error('Colour analysis failed, using fallback colour', err);
+    log.warn({ err }, 'colour analysis failed, using fallback colour');
     return FALLBACK_COLOUR;
   }
 }

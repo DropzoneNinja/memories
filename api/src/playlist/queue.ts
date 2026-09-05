@@ -1,13 +1,15 @@
 import type { Configuration, QueueItem } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
-import { getImmichClient } from '../immich/config.js';
-import { buildPresentation } from './presentation.js';
+import { log } from '../log.js';
+import { getImmichClientForUser, ImmichNotConfiguredError } from '../immich/config.js';
+import type { ImmichAsset } from '../immich/types.js';
+import { buildPresentation, buildVideoPresentation } from './presentation.js';
 import { groupForComposition } from '../composition/group.js';
 import { getOrAnalyzeAssetColour, prismaColourStore } from '../colour/cache.js';
 import { extractDominantColour } from '../colour/dominantColour.js';
 import { combineOklch, oklchToHex } from '../colour/oklch.js';
-import { resolveMatColour } from '../colour/matMode.js';
+import { resolveMatColour, resolveMatTexture } from '../colour/matMode.js';
 
 // Presentation fields are plain JSON-serializable data by construction
 // (presentation.ts), but their named TS interfaces don't structurally
@@ -52,17 +54,51 @@ export async function regenerateQueue(tvId: string, config: Configuration): Prom
       prisma.queueItem.deleteMany({ where: { tvId } }),
       prisma.tv.update({ where: { id: tvId }, data: { lastServedPosition: 0 } }),
     ]);
+    log.info({ tvId, version: config.version }, 'queue cleared (no album configured)');
     return;
   }
 
-  const immich = getImmichClient();
-  const [album, assets] = await Promise.all([
-    immich.getAlbum(albumId),
-    immich.listAlbumAssets(albumId),
-  ]);
+  if (!config.immichOwnerId) {
+    throw new ImmichNotConfiguredError();
+  }
 
-  // Albums can contain videos — filter to images only (video support is
-  // explicitly out of scope for v1, PROJECT.md §14).
+  const startedAt = Date.now();
+  log.info({ tvId, albumId, version: config.version }, 'regenerating queue');
+
+  let rows: Awaited<ReturnType<typeof buildQueueRows>>;
+  try {
+    rows = await buildQueueRows(tvId, config, albumId);
+  } catch (err) {
+    log.error({ tvId, albumId, durationMs: Date.now() - startedAt, err }, 'queue regeneration failed');
+    throw err;
+  }
+
+  await prisma.$transaction([
+    prisma.queueItem.deleteMany({ where: { tvId } }),
+    prisma.queueItem.createMany({ data: rows }),
+    prisma.tv.update({ where: { id: tvId }, data: { lastServedPosition: 0 } }),
+  ]);
+  log.info({ tvId, albumId, items: rows.length, durationMs: Date.now() - startedAt }, 'queue regenerated');
+}
+
+// Fetches the album from Immich, runs the composition and colour/mat
+// engines, and returns the QueueItem rows to persist — split out of
+// regenerateQueue purely so that function can wrap this specific,
+// Immich-touching part in one try/catch for logging without a second copy
+// of the success/failure bookkeeping.
+async function buildQueueRows(tvId: string, config: Configuration, albumId: string) {
+  // config.immichOwnerId is guaranteed non-null by regenerateQueue's own
+  // check before this is ever called.
+  const immich = await getImmichClientForUser(config.immichOwnerId!);
+  const [album, assets] = await Promise.all([immich.getAlbum(albumId), immich.listAlbumAssets(albumId)]);
+
+  if (config.displayMode === 'VIDEO') {
+    return buildVideoQueueRows(tvId, config, album.albumName, assets);
+  }
+
+  // Albums can contain videos too — filter to images only. The VIDEO
+  // display-mode branch above handles the opposite filter; a single
+  // Configuration is always one mode or the other, never both.
   const images = assets.filter((a) => a.type === 'IMAGE');
   const ordered =
     config.playbackMode === 'SHUFFLE' ? seededShuffle(images, `${tvId}:${config.version}`) : images;
@@ -86,18 +122,27 @@ export async function regenerateQueue(tvId: string, config: Configuration): Prom
   // asset id (colour/cache.ts) — an asset appearing in many TVs/albums/
   // regenerations over time is only ever analysed once. Runs group-by-group
   // in parallel; each group's own slot analyses also run in parallel.
+  let colourCacheMisses = 0;
   const rows = await Promise.all(
     groups.map(async (group, index) => {
       const colours = await Promise.all(
         group.slots.map((slot) =>
           getOrAnalyzeAssetColour(prismaColourStore, slot.asset.id, async () => {
+            colourCacheMisses += 1;
             const { body } = await immich.fetchThumbnail(slot.asset.id, 'thumbnail');
             return extractDominantColour(Buffer.from(body));
           }),
         ),
       );
       const matColour = oklchToHex(resolveMatColour(config.matMode, combineOklch(colours)));
-      const presentation = buildPresentation(group, album.albumName, config.intervalSeconds, matColour);
+      const presentation = buildPresentation(
+        group,
+        album.albumName,
+        config.intervalSeconds,
+        matColour,
+        tvId,
+        resolveMatTexture(config.matMode),
+      );
       return {
         tvId,
         position: index,
@@ -108,15 +153,47 @@ export async function regenerateQueue(tvId: string, config: Configuration): Prom
         transition: toJson(presentation.transition),
         assets: toJson(presentation.assets),
         durationSeconds: presentation.duration,
+        displayMode: 'IMAGES' as const,
+        loop: false,
       };
     }),
   );
 
-  await prisma.$transaction([
-    prisma.queueItem.deleteMany({ where: { tvId } }),
-    prisma.queueItem.createMany({ data: rows }),
-    prisma.tv.update({ where: { id: tvId }, data: { lastServedPosition: 0 } }),
-  ]);
+  log.debug(
+    { tvId, albumId, assets: images.length, compositions: groups.length, colourCacheMisses },
+    'queue composition built',
+  );
+  return rows;
+}
+
+// Video's counterpart to the image-composition path above — deliberately
+// I/O-free (only reads its arguments) so it's unit-testable without
+// mocking Prisma/Immich, the same way groupForComposition() is. Skips
+// groupForComposition() and the whole colour/mat engine entirely: a video
+// is always shown one at a time, full-screen, with no per-asset dominant
+// colour to derive a mat from (presentation.ts's buildVideoPresentation
+// uses a fixed neutral mat instead).
+export function buildVideoQueueRows(tvId: string, config: Configuration, albumName: string, assets: ImmichAsset[]) {
+  const videos = assets.filter((a) => a.type === 'VIDEO');
+  const ordered =
+    config.playbackMode === 'SHUFFLE' ? seededShuffle(videos, `${tvId}:${config.version}`) : videos;
+
+  return ordered.map((asset, index) => {
+    const presentation = buildVideoPresentation(asset, albumName, tvId, config.loop);
+    return {
+      tvId,
+      position: index,
+      presentationId: presentation.presentationId,
+      layout: toJson(presentation.layout),
+      background: toJson(presentation.background),
+      frame: toJson(presentation.frame),
+      transition: toJson(presentation.transition),
+      assets: toJson(presentation.assets),
+      durationSeconds: presentation.duration,
+      displayMode: 'VIDEO' as const,
+      loop: config.loop,
+    };
+  });
 }
 
 // The wire shape both /playlist and the Phase 6 dashboard's "current" /
@@ -126,6 +203,8 @@ export function queueItemToPresentation(item: QueueItem) {
   return {
     presentationId: item.presentationId,
     duration: item.durationSeconds,
+    kind: item.displayMode === 'VIDEO' ? ('video' as const) : ('image' as const),
+    loop: item.loop,
     layout: item.layout,
     background: item.background,
     frame: item.frame,

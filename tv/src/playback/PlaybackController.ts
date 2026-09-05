@@ -1,6 +1,7 @@
 import { PresentationRenderer, resolvePresentationUrls } from '../render/PresentationRenderer';
 import { createImageCache } from '../cache/ImageCache';
 import { nextDelay, type BackoffOptions } from '../net/backoff';
+import { log } from '../log/Logger';
 import type { DisconnectedBehavior, HeartbeatResponse, PlaylistResponse, Presentation } from '../api/types';
 
 const FETCH_BATCH_SIZE = 5;
@@ -25,6 +26,15 @@ export interface RendererLike {
   render(presentation: Presentation, autoAdvance?: boolean): void | Promise<void>;
   restartTimer(durationSeconds: number): void;
   clearTimer(): void;
+  // Freeze/resume whatever's currently on screen *in place*, without
+  // re-rendering — pause()/resume() below and the FREEZE disconnected-
+  // behavior policy both need this rather than clearTimer()/restartTimer()
+  // directly, so that resuming a paused video continues playback instead
+  // of recreating the element and restarting it from frame 0 (a real bug
+  // the original image-only clearTimer()+showCurrent() approach had no way
+  // to expose, since re-rendering the same image is a harmless no-op).
+  pauseMedia(): void;
+  resumeMedia(presentation: Presentation): void;
   setOnAdvance(callback: () => void): void;
 }
 
@@ -36,6 +46,33 @@ export interface CacheLike {
   get(url: string): Promise<string>;
   prefetch(urls: string[]): void;
   evictToFit(keepUrls: ReadonlySet<string>): void;
+  // Optional (not exercised by most existing test fakes): diagnostics-only
+  // metrics, satisfied by the real ImageCache. Missing on a fake just
+  // reports zero rather than requiring every test to implement them.
+  size?(): number;
+  totalBytes?(): number;
+}
+
+// Snapshot for the hidden diagnostics view (diagnostics/DiagnosticsView.ts,
+// PROJECT.md §11.2 milestone 8) — deliberately a plain data object rather
+// than exposing PlaybackController's internals directly, so the view can't
+// accidentally mutate playback state while just trying to display it.
+export interface DiagnosticsSnapshot {
+  online: boolean;
+  paused: boolean;
+  queueLength: number;
+  currentPresentationId: string | null;
+  currentFilename: string | null;
+  nextPresentationId: string | null;
+  nextFilename: string | null;
+  cacheEntries: number;
+  cacheBytes: number;
+  lastSyncAt: number | null;
+}
+
+function filenameOf(presentation: Presentation | null | undefined): string | null {
+  const raw = presentation?.assets[0]?.metadata?.filename;
+  return typeof raw === 'string' ? raw : null;
 }
 
 // Minimal surface needed from the API client — satisfied by the real
@@ -85,6 +122,9 @@ export class PlaybackController {
   private lastKnownConfigVersion: number | null = null;
   private consecutiveFailures = 0;
   private offline = false;
+  // Epoch ms of the last successful heartbeat or playlist fetch — the
+  // diagnostics view's "last sync" (null until the very first one lands).
+  private lastSyncAt: number | null = null;
 
   constructor(
     private readonly api: ApiLike,
@@ -160,6 +200,7 @@ export class PlaybackController {
     }
     if (configurationVersion === this.lastKnownConfigVersion) return;
 
+    log.info('config changed', { from: this.lastKnownConfigVersion, to: configurationVersion });
     this.lastKnownConfigVersion = configurationVersion;
     // Discard not-yet-shown stale items from the old config, but leave the
     // currently-displayed one (and its back-buffer) untouched — no visible
@@ -172,9 +213,10 @@ export class PlaybackController {
     this.consecutiveFailures += 1;
     if (this.offline || this.consecutiveFailures < OFFLINE_THRESHOLD) return;
     this.offline = true;
+    log.warn('went offline', { consecutiveFailures: this.consecutiveFailures, disconnectedBehavior: this.disconnectedBehavior });
     if (this.disconnectedBehavior === 'FREEZE') {
       this.autoFrozen = true;
-      this.renderer.clearTimer();
+      this.renderer.pauseMedia();
       this.onStatusChange?.('offline — frozen on current image');
     } else {
       this.onStatusChange?.('offline — playing from cache');
@@ -182,15 +224,17 @@ export class PlaybackController {
   }
 
   private recordSuccess(): void {
+    this.lastSyncAt = Date.now();
     const wasOffline = this.offline;
     this.consecutiveFailures = 0;
     this.offline = false;
     if (!wasOffline) return;
 
+    log.info('reconnected');
     if (this.autoFrozen) {
       this.autoFrozen = false;
       const current = this.queue[this.index];
-      if (!this.paused && current) this.renderer.restartTimer(current.duration);
+      if (!this.paused && current) this.renderer.resumeMedia(current);
     }
     void this.fetchMore();
   }
@@ -244,9 +288,28 @@ export class PlaybackController {
       this.recordSuccess();
       this.trimQueue();
     } catch (err) {
-      console.error('Playlist fetch failed', err);
+      log.warn('playlist fetch failed', { message: String(err) });
       this.recordFailure();
     }
+  }
+
+  // Read by the hidden diagnostics view (diagnostics/DiagnosticsView.ts) —
+  // never used for playback decisions itself.
+  diagnosticsSnapshot(): DiagnosticsSnapshot {
+    const current = this.queue[this.index] ?? null;
+    const next = this.queue[this.index + 1] ?? null;
+    return {
+      online: !this.offline,
+      paused: this.paused,
+      queueLength: this.queue.length,
+      currentPresentationId: current?.presentationId ?? null,
+      currentFilename: filenameOf(current),
+      nextPresentationId: next?.presentationId ?? null,
+      nextFilename: filenameOf(next),
+      cacheEntries: this.imageCache.size?.() ?? 0,
+      cacheBytes: this.imageCache.totalBytes?.() ?? 0,
+      lastSyncAt: this.lastSyncAt,
+    };
   }
 
   next(): void {
@@ -275,13 +338,13 @@ export class PlaybackController {
   pause(): void {
     if (this.paused) return;
     this.paused = true;
-    this.renderer.clearTimer();
-    this.showCurrent();
+    this.renderer.pauseMedia();
   }
 
   resume(): void {
     if (!this.paused) return;
     this.paused = false;
-    this.showCurrent();
+    const current = this.queue[this.index];
+    if (current) this.renderer.resumeMedia(current);
   }
 }

@@ -25,7 +25,7 @@ interface Props {
 // (PROJECT.md §12, revisited for the dashboard — GPS EXIF was previously
 // "never surfaced anywhere"; still never sent to the TV, see
 // api/src/playlist/presentation.ts). Coordinates come from the parent,
-// which fetches them per-asset via GET /assets/:id/location — this
+// which fetches them per-asset via GET /tvs/:tvId/assets/:assetId/location — this
 // component only ever renders a map, it never fetches.
 export function LocationMap({ latitude, longitude, label, loading }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);

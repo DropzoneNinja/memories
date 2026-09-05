@@ -32,16 +32,31 @@ enum MatMode {
   ANALOGOUS
   // Fixed neutrals (§5.3: "plus fixed neutrals — white, black, walnut/
   // wood") — unlike every mode above, these ignore the photo's dominant
-  // colour entirely and always render the same swatch.
+  // colour entirely and always render the same swatch. WOOD/CORK/COTTON
+  // additionally render with a real material texture layered under the
+  // usual vignette (colour/matMode.ts's fixed OKLCH values are still the
+  // base tone/fallback — see the `texture` field on the wire, added
+  // alongside `colour` in playlist/presentation.ts) rather than a
+  // perfectly flat colour, per the RAW/matt-example-3.png reference.
   WHITE
   BLACK
   WOOD
+  CORK
+  COTTON
 }
 
 enum DisconnectedBehavior {
   CONTINUE_QUEUE
   REPEAT_QUEUE
   FREEZE
+}
+
+// Video playback mode (post-Phase-8 addition — video was originally out of
+// scope, see PROJECT.md §10/§14): a TV displays either its album's photos
+// (existing behaviour) or its album's videos, never both at once.
+enum DisplayMode {
+  IMAGES
+  VIDEO
 }
 
 enum CommandType {
@@ -64,6 +79,28 @@ model User {
   createdAt    DateTime       @default(now())
   permissions  TvPermission[]
   auditLogs    AuditLog[]
+  // True from account creation (routes/admin.ts's "register new user") or
+  // an admin-triggered reset until the user actually calls
+  // `PUT /me/password` themselves — a temp password is a lower-security
+  // shared secret (generated, displayed once to the admin, handed off
+  // out-of-band) and shouldn't stay valid for continued use. Enforced by
+  // requirePasswordCurrent (auth/middleware.ts), which blocks every other
+  // dashboard route while this is true.
+  mustChangePassword Boolean @default(false)
+  // Per-user Immich credential: each household member connects
+  // their own Immich API key from Memories Web so they see their own
+  // albums, rather than one shared key from .env. AES-256-GCM ciphertext
+  // (api/src/immich/crypto.ts), keyed by ENCRYPTION_KEY — never the
+  // plaintext key, never returned by any API response. The Immich server
+  // address itself (IMMICH_BASE_URL) stays a shared, env-configured
+  // setting — it's the same one self-hosted instance for the whole
+  // household, only the identity/API key differs per user.
+  immichApiKeyEncrypted String?
+  // Last 4 characters of the plaintext key, stored alongside the
+  // ciphertext purely so the UI can show "connected, ending in ••1234"
+  // without ever decrypting just to render a status line.
+  immichKeyLast4         String?
+  ownedConfigurations     Configuration[]
 }
 
 model Tv {
@@ -144,6 +181,12 @@ model Configuration {
   intervalSeconds      Int                  @default(600)
   playbackMode         PlaybackMode         @default(SHUFFLE)
   matMode              MatMode              @default(AUTOMATIC)
+  // VIDEO mode plays the same selected album's video assets instead of its
+  // photos (queue.ts's buildVideoQueueRows) — `loop` only has an effect in
+  // VIDEO mode: true replays the current video indefinitely, false advances
+  // through the album's videos in order, wrapping after the last one.
+  displayMode          DisplayMode          @default(IMAGES)
+  loop                 Boolean              @default(false)
   disconnectedBehavior DisconnectedBehavior @default(CONTINUE_QUEUE)
   cacheSize            Int                  @default(8)
   // Collage layout (§5.2 addendum): every `collageFrequency`th composition
@@ -152,24 +195,42 @@ model Configuration {
   maxCollageImages     Int                  @default(6)
   collageFrequency     Int                  @default(0)
   createdAt            DateTime             @default(now())
+  // Whose Immich account backs this config version — set to whichever
+  // user saved it (routes/tvs.ts's PUT .../config). Queue generation and
+  // the TV-facing thumbnail proxy both resolve Immich credentials through
+  // this, not the logged-in dashboard viewer, since the TV itself has no
+  // login concept and fetches thumbnails long after whoever configured it
+  // has logged out. SetNull rather than Cascade: if that user's account is
+  // ever removed, old Configuration rows (and the audit trail of what was
+  // configured) should survive — they just stop being able to regenerate
+  // the queue until someone else reconfigures the TV.
+  immichOwner          User?                @relation(fields: [immichOwnerId], references: [id], onDelete: SetNull)
+  immichOwnerId        String?
 
   @@unique([tvId, version])
 }
 
 // A generated Presentation (§5.1) queued for a TV.
 model QueueItem {
-  id              String   @id @default(cuid())
-  tv              Tv       @relation(fields: [tvId], references: [id], onDelete: Cascade)
+  id              String      @id @default(cuid())
+  tv              Tv          @relation(fields: [tvId], references: [id], onDelete: Cascade)
   tvId            String
   position        Int
-  presentationId  String   @unique
+  presentationId  String      @unique
   layout          Json
   background      Json
   frame           Json
   transition      Json
   assets          Json
   durationSeconds Int
-  createdAt       DateTime @default(now())
+  // Baked into the row (not looked up from Configuration at read time)
+  // because queueItemToPresentation() reconstructs the wire Presentation
+  // from a single row with no Configuration join at two of its three call
+  // sites (/playlist, getUpcomingPreview) — same reasoning as every other
+  // per-row Presentation field (e.g. the mat colour).
+  displayMode     DisplayMode @default(IMAGES)
+  loop            Boolean     @default(false)
+  createdAt       DateTime    @default(now())
 
   @@index([tvId, position])
 }

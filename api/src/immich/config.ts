@@ -1,19 +1,36 @@
+import { prisma } from '../db.js';
+import { decryptSecret } from './crypto.js';
 import { ImmichClient } from './ImmichClient.js';
 
-let client: ImmichClient | null = null;
+// Thrown when a user has no Immich API key saved yet — routes catch this
+// specifically to return a friendly 400 ("connect your account first")
+// instead of a generic 500.
+export class ImmichNotConfiguredError extends Error {
+  constructor() {
+    super('Connect your Immich account in Settings first');
+    this.name = 'ImmichNotConfiguredError';
+  }
+}
 
-// Lazy singleton: only the Memories API ever holds this client/credential
-// (PROJECT.md §6) — nothing else in this codebase should read
-// IMMICH_API_KEY directly.
-export function getImmichClient(): ImmichClient {
-  if (client) return client;
-
+// Per-user client: each household member holds their own Immich API key
+// (see immich/crypto.ts, routes/settings.ts) rather than the whole app
+// sharing one credential from .env — nothing else in this codebase
+// should read IMMICH_API_KEY or decrypt a key directly (PROJECT.md §6).
+// Deliberately not cached/singleton like the old env-based client: a key
+// can be rotated or disconnected at any time, and constructing an
+// ImmichClient is cheap (just holds two strings), so there's no real cost
+// to always building fresh from the current DB row.
+export async function getImmichClientForUser(userId: string): Promise<ImmichClient> {
   const baseUrl = process.env.IMMICH_BASE_URL;
-  const apiKey = process.env.IMMICH_API_KEY;
-  if (!baseUrl || !apiKey) {
-    throw new Error('IMMICH_BASE_URL and IMMICH_API_KEY must be set (see .env.example)');
+  if (!baseUrl) {
+    throw new Error('IMMICH_BASE_URL must be set (see .env.example)');
   }
 
-  client = new ImmichClient({ baseUrl, apiKey });
-  return client;
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user?.immichApiKeyEncrypted) {
+    throw new ImmichNotConfiguredError();
+  }
+
+  const apiKey = decryptSecret(user.immichApiKeyEncrypted);
+  return new ImmichClient({ baseUrl, apiKey });
 }

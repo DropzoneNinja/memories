@@ -1,8 +1,11 @@
 import type { FastifyInstance } from 'fastify';
+import { Readable } from 'node:stream';
 import { z } from 'zod';
 import { prisma } from '../db.js';
+import { log } from '../log.js';
 import { regenerateQueue, getNextPlaylistItems, getUpcomingPreview, queueItemToPresentation } from '../playlist/queue.js';
 import { requireAuth } from '../auth/middleware.js';
+import { getImmichClientForUser, ImmichNotConfiguredError } from '../immich/config.js';
 import * as realtimeHub from '../realtime/hub.js';
 
 const PAIRING_CODE_TTL_MS = 10 * 60_000;
@@ -41,8 +44,12 @@ const configBodySchema = z.object({
       'WHITE',
       'BLACK',
       'WOOD',
+      'CORK',
+      'COTTON',
     ])
     .optional(),
+  displayMode: z.enum(['IMAGES', 'VIDEO']).optional(),
+  loop: z.boolean().optional(),
   disconnectedBehavior: z.enum(['CONTINUE_QUEUE', 'REPEAT_QUEUE', 'FREEZE']).optional(),
   cacheSize: z.number().int().positive().optional(),
   maxCollageImages: z.number().int().min(2).max(9).optional(),
@@ -186,6 +193,71 @@ export async function tvRoutes(app: FastifyInstance): Promise<void> {
     return pending.map((c) => ({ id: c.id, type: c.type, createdAt: c.createdAt }));
   });
 
+  // Thumbnail proxy — called directly by the TV itself (every
+  // Presentation's asset URL points here, §5.1, presentation.ts). No auth
+  // (device-facing, §6/§13 — the TV has no login concept), and keyed by
+  // the TV's own internal id rather than a flat /assets/:id route:
+  // different TVs can now be backed by different household members'
+  // Immich accounts, so resolving "whose Immich API key fetches this
+  // asset" has to go through the TV's active configuration
+  // (Configuration.immichOwnerId), not a global client.
+  app.get<{ Params: { tvId: string; assetId: string }; Querystring: { size?: 'thumbnail' | 'preview' } }>(
+    '/api/v1/tvs/:tvId/assets/:assetId/thumbnail',
+    async (request, reply) => {
+      const config = await prisma.configuration.findFirst({
+        where: { tvId: request.params.tvId },
+        orderBy: { version: 'desc' },
+      });
+      if (!config?.immichOwnerId) return reply.code(404).send({ error: 'TV not configured' });
+
+      try {
+        const immich = await getImmichClientForUser(config.immichOwnerId);
+        const { body, contentType } = await immich.fetchThumbnail(
+          request.params.assetId,
+          request.query.size ?? 'preview',
+        );
+        reply.header('Content-Type', contentType);
+        return reply.send(Buffer.from(body));
+      } catch (err) {
+        if (err instanceof ImmichNotConfiguredError) return reply.code(404).send({ error: err.message });
+        throw err;
+      }
+    },
+  );
+
+  // Video streaming proxy (post-Phase-8 addition) — same device-facing,
+  // no-auth, immichOwnerId-credential-resolution shape as the thumbnail
+  // proxy above, but *piping* Immich's response instead of buffering it:
+  // a video can be far larger than a thumbnail, so this forwards the TV's
+  // Range header and Immich's status/Content-Range/Accept-Ranges headers
+  // straight through, letting the TV's <video> element do normal HTTP
+  // range-request seeking/buffering without the API ever holding a whole
+  // file in memory.
+  app.get<{ Params: { tvId: string; assetId: string } }>(
+    '/api/v1/tvs/:tvId/assets/:assetId/video',
+    async (request, reply) => {
+      const config = await prisma.configuration.findFirst({
+        where: { tvId: request.params.tvId },
+        orderBy: { version: 'desc' },
+      });
+      if (!config?.immichOwnerId) return reply.code(404).send({ error: 'TV not configured' });
+
+      try {
+        const immich = await getImmichClientForUser(config.immichOwnerId);
+        const upstream = await immich.fetchVideoStream(request.params.assetId, request.headers.range);
+        reply.code(upstream.status);
+        for (const header of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+          const value = upstream.headers.get(header);
+          if (value) reply.header(header, value);
+        }
+        return reply.send(upstream.body ? Readable.fromWeb(upstream.body as never) : undefined);
+      } catch (err) {
+        if (err instanceof ImmichNotConfiguredError) return reply.code(404).send({ error: err.message });
+        throw err;
+      }
+    },
+  );
+
   // --- admin-facing (Memories Web, Phase 6) — everything below requires
   // a logged-in session. Device-facing routes above never do (§6, §13:
   // the TV has no login concept at all).
@@ -219,6 +291,46 @@ export async function tvRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
+  // Dashboard-only location lookup (Phase 6, later made TV-scoped so it
+  // can resolve per-TV Immich credentials) — "GPS never surfaced
+  // anywhere" (§12) still holds for the TV itself; this is fetched by
+  // Memories Web only, on demand, for whichever photo the dashboard has
+  // focused (never part of
+  // Presentation/QueueItem, see playlist/presentation.ts). Resolves
+  // Immich credentials via the TV's *configured* account
+  // (Configuration.immichOwnerId), not the logged-in viewer — the photo
+  // on screen came from whoever last saved that TV's config, which isn't
+  // necessarily whoever is currently looking at the dashboard.
+  app.get<{ Params: { tvId: string; assetId: string } }>(
+    '/api/v1/tvs/:tvId/assets/:assetId/location',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const config = await prisma.configuration.findFirst({
+        where: { tvId: request.params.tvId },
+        orderBy: { version: 'desc' },
+      });
+      if (!config?.immichOwnerId) return reply.code(404).send({ error: 'TV not configured' });
+
+      try {
+        const immich = await getImmichClientForUser(config.immichOwnerId);
+        const asset = await immich.getAsset(request.params.assetId).catch(() => null);
+        if (!asset) return reply.code(404).send({ error: 'Asset not found' });
+
+        const exif = asset.exifInfo;
+        return {
+          latitude: exif?.latitude ?? null,
+          longitude: exif?.longitude ?? null,
+          city: exif?.city ?? null,
+          state: exif?.state ?? null,
+          country: exif?.country ?? null,
+        };
+      } catch (err) {
+        if (err instanceof ImmichNotConfiguredError) return reply.code(404).send({ error: err.message });
+        throw err;
+      }
+    },
+  );
+
   app.post<{ Body: { pairingCode: string; name: string } }>(
     '/api/v1/tvs/pairing/complete',
     { preHandler: requireAuth },
@@ -233,10 +345,32 @@ export async function tvRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: 'Invalid or expired pairing code' });
       }
 
-      return prisma.tv.update({
+      const paired = await prisma.tv.update({
         where: { id: tv.id },
         data: { name, pairedAt: new Date(), pairingCode: null, pairingCodeExpiresAt: null },
       });
+      log.info({ tvId: paired.id, name, userId: request.user!.userId }, 'tv paired');
+      return paired;
+    },
+  );
+
+  // Rename an already-paired TV — separate from pairing/complete (which
+  // only ever names a TV once, at pairing time) since there was otherwise
+  // no way to fix a typo or just call it something else later without
+  // unpairing and starting over.
+  app.patch<{ Params: { id: string }; Body: { name: string } }>(
+    '/api/v1/tvs/:id',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const name = request.body?.name?.trim();
+      if (!name) return reply.code(400).send({ error: 'name is required' });
+
+      const tv = await prisma.tv.findUnique({ where: { id: request.params.id } });
+      if (!tv) return reply.code(404).send({ error: 'TV not found' });
+
+      const updated = await prisma.tv.update({ where: { id: tv.id }, data: { name } });
+      log.info({ tvId: tv.id, from: tv.name, to: name, userId: request.user!.userId }, 'tv renamed');
+      return updated;
     },
   );
 
@@ -263,15 +397,33 @@ export async function tvRoutes(app: FastifyInstance): Promise<void> {
           intervalSeconds: parsed.data.intervalSeconds ?? latest?.intervalSeconds ?? 600,
           playbackMode: parsed.data.playbackMode ?? latest?.playbackMode ?? 'SHUFFLE',
           matMode: parsed.data.matMode ?? latest?.matMode ?? 'AUTOMATIC',
+          displayMode: parsed.data.displayMode ?? latest?.displayMode ?? 'IMAGES',
+          loop: parsed.data.loop ?? latest?.loop ?? false,
           disconnectedBehavior:
             parsed.data.disconnectedBehavior ?? latest?.disconnectedBehavior ?? 'CONTINUE_QUEUE',
           cacheSize: parsed.data.cacheSize ?? latest?.cacheSize ?? 8,
           maxCollageImages: parsed.data.maxCollageImages ?? latest?.maxCollageImages ?? 6,
           collageFrequency: parsed.data.collageFrequency ?? latest?.collageFrequency ?? 0,
+          // Whoever saves a config becomes the Immich account the queue is
+          // built from (see the comment on this field in schema.prisma) —
+          // so picking an album always pulls from the saving user's own
+          // library.
+          immichOwnerId: request.user!.userId,
         },
       });
+      log.info(
+        { tvId: tv.id, version: config.version, userId: request.user!.userId, albumIds: config.albumIds },
+        'tv config saved',
+      );
 
-      await regenerateQueue(tv.id, config);
+      try {
+        await regenerateQueue(tv.id, config);
+      } catch (err) {
+        if (err instanceof ImmichNotConfiguredError) {
+          return reply.code(400).send({ error: err.message });
+        }
+        throw err;
+      }
       realtimeHub.notifyConfigChanged(tv.deviceId, config.version);
       return config;
     },
@@ -287,7 +439,9 @@ export async function tvRoutes(app: FastifyInstance): Promise<void> {
       const parsed = commandBodySchema.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
-      return prisma.command.create({ data: { tvId: tv.id, type: parsed.data.type } });
+      const command = await prisma.command.create({ data: { tvId: tv.id, type: parsed.data.type } });
+      log.info({ tvId: tv.id, type: parsed.data.type, userId: request.user!.userId }, 'command enqueued');
+      return command;
     },
   );
 
@@ -310,6 +464,7 @@ export async function tvRoutes(app: FastifyInstance): Promise<void> {
       if (!tv) return reply.code(404).send({ error: 'TV not found' });
 
       await prisma.tv.delete({ where: { id: tv.id } });
+      log.info({ tvId: tv.id, name: tv.name, userId: request.user!.userId }, 'tv deleted');
       return reply.code(204).send();
     },
   );

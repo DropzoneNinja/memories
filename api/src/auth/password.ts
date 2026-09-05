@@ -8,6 +8,15 @@ import { promisify } from 'node:util';
 const scrypt = promisify(scryptCallback);
 const KEY_LENGTH = 64;
 
+// Temporary passwords (routes/admin.ts's create-user/reset-password) —
+// 9 bytes (72 bits) of randomness, base64url so it's readable/typeable
+// and safe to display/copy as plain text. Shown to the admin exactly
+// once in the API response; never stored anywhere but as this user's
+// (soon-to-be-replaced) passwordHash.
+export function generateTempPassword(): string {
+  return randomBytes(9).toString('base64url');
+}
+
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
   const derived = (await scrypt(password, salt, KEY_LENGTH)) as Buffer;

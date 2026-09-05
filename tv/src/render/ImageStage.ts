@@ -15,46 +15,13 @@
 // physical mat rather than a flat web image. Kept deliberately
 // restrained: this is "photograph -> physical mat -> shadow -> screen"
 // (§5.4), not a drop-shadow-heavy UI card.
+//
+// MAT_MARGIN/boxShadowFor/hexToRgba/applyMatBackground live in matStyles.ts,
+// shared with VideoStage (post-Phase-8 addition) — both render single- or
+// multi-slot content matted the same way.
+import { applyMatBackground, boxShadowFor, MAT_MARGIN, NO_FRAME, type FrameStyle } from './matStyles';
 
-export interface FrameStyle {
-  shadow: string; // 'subtle' | 'none'
-  bevel: string; // 'inner' | 'none'
-}
-
-const NO_FRAME: FrameStyle = { shadow: 'none', bevel: 'none' };
-
-// Uniform mat margin reserved around every photo, on every side. `vmin`
-// resolves against the viewport, not each slot's own (possibly narrower)
-// box, so a two/three-portrait composition's individual photos get the
-// same real-pixel margin as a single full-screen photo — every photo
-// matted consistently, not "whatever's left after contain-fit happened
-// to land." Without this, a photo whose aspect ratio exactly matches its
-// slot touches that slot's edges directly, leaving no mat margin (and
-// nothing for the bevel highlight/shadow to show up against) on
-// whichever side(s) contain-fit maxed out — caught on real hardware: a
-// height-constrained photo touched the screen's top and bottom edges
-// exactly, so the inner-edge highlight had nowhere to render there.
-const MAT_MARGIN = '2.5vmin';
-
-function boxShadowFor(frame: FrameStyle): string {
-  const layers: string[] = [];
-  if (frame.shadow !== 'none') {
-    // The photo lifted slightly off the mat, plus a hairline edge that
-    // grounds it — both very soft, never a hard-edged web-card shadow.
-    layers.push('0 3px 14px rgba(0,0,0,0.35)', '0 0 0 1px rgba(0,0,0,0.08)');
-  }
-  if (frame.bevel !== 'none') {
-    // A full-perimeter hairline highlight — the bevel-cut inner edge of
-    // a real mat is visible all the way around a mounted print, not just
-    // along one side. `inset 0 0 0 1px` (zero offset, 1px spread) draws
-    // that evenly on all four edges; an offset inset shadow like
-    // `inset 0 1px 0` only ever paints one side, which is what this
-    // replaced (caught on real hardware: the highlight only showed up on
-    // the top edge).
-    layers.push('inset 0 0 0 1px rgba(255,255,255,0.07)');
-  }
-  return layers.join(', ');
-}
+export type { FrameStyle };
 
 // One flex row of equally-sized, contain-fit, matted slots — the shared
 // building block for both a normal (non-collage) composition and each row
@@ -138,11 +105,23 @@ export class ImageStage {
     container.appendChild(this.root);
   }
 
-  setMatColor(color: string): void {
-    // A very faint vignette over the flat mat colour — the "faint tonal
-    // gradient" §5.4 asks for. Subtle enough that it reads as a physical
-    // surface catching light unevenly, not as a visible design element.
-    this.root.style.background = `radial-gradient(ellipse at center, rgba(255,255,255,0.025), rgba(0,0,0,0.06)), ${color}`;
+  // `textureUrl`, when given (WOOD/CORK/COTTON — colour/matMode.ts's
+  // resolveMatTexture, RAW/matt-example-3.png), layers a real material
+  // photo under the usual vignette instead of a perfectly flat colour.
+  // Tinted with a 55%-opacity wash of the mat's own computed colour so it
+  // reads as "this material, in this mat's tone" rather than the raw
+  // photographed swatch showing through untouched — kept deliberately
+  // subtle (a materials *hint*, not a bold pattern).
+  setMatColor(color: string, textureUrl: string | null = null): void {
+    applyMatBackground(this.root, color, textureUrl);
+  }
+
+  // Toggled by PresentationRenderer when switching between image and video
+  // content (VideoStage, post-Phase-8 addition) — both stages' root
+  // elements live in the same container simultaneously, so only the active
+  // one should ever be visible/painted.
+  setVisible(visible: boolean): void {
+    this.root.style.display = visible ? '' : 'none';
   }
 
   // One image per slot, left-to-right (or, for a collage, left-to-right

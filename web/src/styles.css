@@ -73,11 +73,12 @@ h3 {
   border-radius: var(--radius);
 }
 
-.login-card h1 {
-  text-align: center;
-  letter-spacing: 0.04em;
-  color: var(--accent);
-  margin-bottom: 8px;
+.login-logo {
+  display: block;
+  width: 100%;
+  max-width: 220px;
+  margin: 0 auto 8px;
+  border-radius: 8px;
 }
 
 .login-card label {
@@ -337,6 +338,36 @@ h3 {
   gap: 12px;
 }
 
+.tv-rename-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tv-rename-form input {
+  padding: 6px 10px;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 15px;
+  min-width: 220px;
+}
+
+.tv-rename-form button[type='submit'] {
+  padding: 6px 14px;
+  background: var(--accent);
+  color: #1a1a1a;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tv-rename-form button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .now-showing {
   display: flex;
   flex-direction: column;
@@ -383,6 +414,7 @@ h3 {
    more than one photo highlighted at a time (see resolveSelection in
    TvDetailPane.tsx). */
 .photo-tile {
+  position: relative;
   flex: 1 1 0;
   min-width: 0;
   min-height: 0;
@@ -398,11 +430,33 @@ h3 {
   font: inherit;
 }
 
+/* Post-Phase-8 addition — distinguishes a video item from a still photo in
+   the "Now Showing"/"Next" strips (TvDetailPane.tsx), since both render
+   through the same .photo-tile/img markup (the img is the video's poster
+   frame, not a live preview). */
+.video-badge {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+}
+
 .photo-tile img {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  /* Mirrors tv/src/render/ImageStage.ts's boxShadowFor — a soft cast
+     shadow onto the mat, not just a tight lift shadow, so this small
+     preview reads the same as the real TV output. */
+  box-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.35),
+    0 8px 30px rgba(0, 0, 0, 0.25);
 }
 
 .photo-tile.selected {
@@ -585,6 +639,16 @@ h3 {
   color: var(--text-dim);
 }
 
+/* Checkbox fields (post-Phase-8 addition — the Loop toggle) — every other
+   .config-form label stacks "text above input" (flex-direction: column
+   above), which is wrong for a checkbox: it needs to sit inline with its
+   own text, not on its own line above it. */
+.config-form label.checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
 .config-form select,
 .config-form input {
   padding: 8px 10px;
@@ -626,5 +690,128 @@ h3 {
 }
 
 .empty-state {
+  color: var(--text-dim);
+}
+
+.immich-settings {
+  max-width: 480px;
+}
+
+.key-status {
+  font-size: 13px;
+  margin: 0;
+}
+
+.key-status.connected {
+  color: var(--online);
+}
+
+.key-status.disconnected {
+  color: var(--text-dim);
+}
+
+/* Settings screen */
+
+.settings-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  max-width: 560px;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-section h2 {
+  font-size: 16px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.settings-section h3 {
+  font-size: 14px;
+  color: var(--text-dim);
+  margin: 4px 0 0;
+}
+
+.admin-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.temp-credential-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  background: var(--panel-alt);
+  border: 1px solid var(--accent-dim);
+  border-radius: var(--radius);
+}
+
+.temp-credential-value {
+  font-family: monospace;
+  font-size: 16px;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  user-select: all;
+}
+
+.user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.user-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.user-table th {
+  text-align: left;
+  color: var(--text-dim);
+  font-weight: 500;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.user-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.user-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.badge-ok {
+  background: rgba(123, 191, 138, 0.15);
+  color: var(--online);
+}
+
+.badge-warn {
+  background: rgba(217, 119, 107, 0.15);
+  color: var(--danger);
+}
+
+.badge-neutral {
+  background: var(--panel-alt);
   color: var(--text-dim);
 }

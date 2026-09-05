@@ -12,10 +12,16 @@ import { selectBestMat } from './matScoring.js';
 // Fixed neutrals (§5.3: "plus fixed neutrals — white, black, walnut/
 // wood") — picked by eye in OKLCH, not derived from any real material
 // sample; "wood" here means "a fixed warm walnut-ish brown," matching the
-// spec's own phrasing.
+// spec's own phrasing. WOOD/CORK/COTTON also carry a real texture image
+// (see resolveMatTexture below) layered over this colour on both
+// renderers — the colour stays the flat base/fallback tone, roughly
+// matched to its texture so a slow-loading image never looks jarring
+// against it.
 const FIXED_WHITE: Oklch = { l: 0.98, c: 0.002, h: 90 };
 const FIXED_BLACK: Oklch = { l: 0.1, c: 0.004, h: 90 };
 const FIXED_WOOD: Oklch = { l: 0.42, c: 0.06, h: 55 };
+const FIXED_CORK: Oklch = { l: 0.5, c: 0.09, h: 45 };
+const FIXED_COTTON: Oklch = { l: 0.93, c: 0.008, h: 80 };
 
 function byKind(candidates: MatCandidate[], kind: MatCandidateKind): MatCandidate {
   return candidates.find((c) => c.kind === kind) ?? candidates[0];
@@ -47,9 +53,31 @@ export function resolveMatColour(matMode: MatMode, dominant: Oklch): Oklch {
       return FIXED_BLACK;
     case 'WOOD':
       return FIXED_WOOD;
+    case 'CORK':
+      return FIXED_CORK;
+    case 'COTTON':
+      return FIXED_COTTON;
     default: {
       const exhaustive: never = matMode;
       throw new Error(`Unhandled MatMode: ${String(exhaustive)}`);
     }
+  }
+}
+
+export type MatTexture = 'wood' | 'cork' | 'cotton';
+
+// Which bundled material texture (if any) a mode renders over its flat
+// colour — a static app asset (tv/public/mats/, web/public/mats/), never
+// served by the API itself, so this is just the lookup key, not a URL.
+export function resolveMatTexture(matMode: MatMode): MatTexture | null {
+  switch (matMode) {
+    case 'WOOD':
+      return 'wood';
+    case 'CORK':
+      return 'cork';
+    case 'COTTON':
+      return 'cotton';
+    default:
+      return null;
   }
 }

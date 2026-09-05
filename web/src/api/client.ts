@@ -2,6 +2,7 @@
 // Immich directly (PROJECT.md §6). Attaches the stored session token to
 // every request except login itself.
 import type {
+  AdminUserSummary,
   AlbumSummary,
   AssetLocation,
   CommandType,
@@ -9,6 +10,7 @@ import type {
   ConfigInput,
   LoginResponse,
   PairingCompleteResponse,
+  TempCredential,
   TvDetail,
   TvSummary,
   User,
@@ -74,6 +76,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ pairingCode, name }),
     }),
+  renameTv: (id: string, name: string) =>
+    request<TvSummary>(`/api/v1/tvs/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   updateConfig: (id: string, body: ConfigInput) =>
     request<Configuration>(`/api/v1/tvs/${id}/config`, { method: 'PUT', body: JSON.stringify(body) }),
   sendCommand: (id: string, type: CommandType) =>
@@ -81,7 +85,26 @@ export const api = {
   deleteTv: (id: string) => request<void>(`/api/v1/tvs/${id}`, { method: 'DELETE' }),
 
   listAlbums: () => request<AlbumSummary[]>('/api/v1/albums'),
-  getAssetLocation: (assetId: string) => request<AssetLocation>(`/api/v1/assets/${assetId}/location`),
+  getAssetLocation: (tvId: string, assetId: string) =>
+    request<AssetLocation>(`/api/v1/tvs/${tvId}/assets/${assetId}/location`),
+
+  // Immich account settings — each user connects/disconnects
+  // their own API key; both return the updated User so the caller can
+  // refresh auth state without a separate /me round-trip.
+  updateImmichKey: (apiKey: string) =>
+    request<User>('/api/v1/me/immich', { method: 'PUT', body: JSON.stringify({ apiKey }) }),
+  disconnectImmich: () => request<User>('/api/v1/me/immich', { method: 'DELETE' }),
+
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<User>('/api/v1/me/password', { method: 'PUT', body: JSON.stringify({ currentPassword, newPassword }) }),
+
+  // Admin-only account management (routes/admin.ts) — every call here
+  // 403s server-side for a non-admin, this is just the client wrapper.
+  adminListUsers: () => request<AdminUserSummary[]>('/api/v1/admin/users'),
+  adminCreateUser: (email: string) =>
+    request<TempCredential>('/api/v1/admin/users', { method: 'POST', body: JSON.stringify({ email }) }),
+  adminResetPassword: (userId: string) =>
+    request<TempCredential>(`/api/v1/admin/users/${userId}/reset-password`, { method: 'POST' }),
 
   // Presentation asset URLs are server-relative (§6) — resolve against
   // the same API base, same pattern as the TV's own resolveAssetUrl.

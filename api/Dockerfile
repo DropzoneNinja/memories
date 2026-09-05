@@ -16,4 +16,11 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/prisma ./prisma
 COPY package.json ./
 EXPOSE 4000
-CMD ["node", "dist/main.js"]
+# Applies any pending Prisma migrations before the server starts — without
+# this, "the entire backend/web stack runs from a single docker-compose
+# up" (PROJECT.md §11.3) wasn't actually true for a genuinely fresh clone:
+# a brand-new Postgres volume had no tables at all until someone remembered
+# to run `prisma migrate deploy` by hand. `migrate deploy` (not `dev`) is
+# the non-interactive, production-safe form — applies what exists, never
+# prompts, never generates a new migration.
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main.js"]

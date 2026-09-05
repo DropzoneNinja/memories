@@ -5,6 +5,7 @@ import type {
   Configuration,
   ConfigInput,
   DisconnectedBehavior,
+  DisplayMode,
   MatMode,
   PlaybackMode,
   TvSummary,
@@ -22,25 +23,31 @@ const MAT_MODES: MatMode[] = [
   'WHITE',
   'BLACK',
   'WOOD',
+  'CORK',
+  'COTTON',
 ];
 const PLAYBACK_MODES: PlaybackMode[] = ['SEQUENTIAL', 'SHUFFLE'];
 const DISCONNECTED_BEHAVIORS: DisconnectedBehavior[] = ['CONTINUE_QUEUE', 'REPEAT_QUEUE', 'FREEZE'];
+const DISPLAY_MODES: DisplayMode[] = ['IMAGES', 'VIDEO'];
 
 interface Props {
   tv: TvSummary;
   albums: AlbumSummary[];
+  albumsError: string | null;
   onSaved: (config: Configuration) => void;
 }
 
 // PUT .../config bumps the config version, regenerates the queue, and
 // the TV picks up the change on its next playlist fetch (PROJECT.md
 // §5.10) — "Save" here really does mean "push to TV."
-export function ConfigForm({ tv, albums, onSaved }: Props) {
+export function ConfigForm({ tv, albums, albumsError, onSaved }: Props) {
   const config = tv.config;
   const [albumId, setAlbumId] = useState(config?.albumIds[0] ?? '');
   const [intervalSeconds, setIntervalSeconds] = useState(config?.intervalSeconds ?? 600);
   const [playbackMode, setPlaybackMode] = useState<PlaybackMode>(config?.playbackMode ?? 'SHUFFLE');
   const [matMode, setMatMode] = useState<MatMode>(config?.matMode ?? 'AUTOMATIC');
+  const [displayMode, setDisplayMode] = useState<DisplayMode>(config?.displayMode ?? 'IMAGES');
+  const [loop, setLoop] = useState(config?.loop ?? false);
   const [disconnectedBehavior, setDisconnectedBehavior] = useState<DisconnectedBehavior>(
     config?.disconnectedBehavior ?? 'CONTINUE_QUEUE',
   );
@@ -62,6 +69,8 @@ export function ConfigForm({ tv, albums, onSaved }: Props) {
         intervalSeconds,
         playbackMode,
         matMode,
+        displayMode,
+        loop,
         disconnectedBehavior,
         maxCollageImages,
         collageFrequency,
@@ -91,15 +100,36 @@ export function ConfigForm({ tv, albums, onSaved }: Props) {
           ))}
         </select>
       </label>
+      {albumsError && (
+        <p className="form-error">{albumsError} — connect your Immich account via "Settings" above.</p>
+      )}
       <label>
-        Interval (seconds)
-        <input
-          type="number"
-          min={5}
-          value={intervalSeconds}
-          onChange={(e) => setIntervalSeconds(Number(e.target.value))}
-        />
+        Display
+        <select value={displayMode} onChange={(e) => setDisplayMode(e.target.value as DisplayMode)}>
+          {DISPLAY_MODES.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
       </label>
+      {displayMode === 'VIDEO' && (
+        <label className="checkbox-label">
+          <input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} />
+          Loop (replay the current video indefinitely instead of advancing)
+        </label>
+      )}
+      {displayMode === 'IMAGES' && (
+        <label>
+          Interval (seconds)
+          <input
+            type="number"
+            min={5}
+            value={intervalSeconds}
+            onChange={(e) => setIntervalSeconds(Number(e.target.value))}
+          />
+        </label>
+      )}
       <label>
         Playback
         <select value={playbackMode} onChange={(e) => setPlaybackMode(e.target.value as PlaybackMode)}>
@@ -110,16 +140,18 @@ export function ConfigForm({ tv, albums, onSaved }: Props) {
           ))}
         </select>
       </label>
-      <label>
-        Mat
-        <select value={matMode} onChange={(e) => setMatMode(e.target.value as MatMode)}>
-          {MAT_MODES.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
-      </label>
+      {displayMode === 'IMAGES' && (
+        <label>
+          Mat
+          <select value={matMode} onChange={(e) => setMatMode(e.target.value as MatMode)}>
+            {MAT_MODES.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label>
         If disconnected
         <select
@@ -142,25 +174,29 @@ export function ConfigForm({ tv, albums, onSaved }: Props) {
           onChange={(e) => setCacheSize(Number(e.target.value))}
         />
       </label>
-      <label>
-        Max images per collage
-        <input
-          type="number"
-          min={2}
-          max={9}
-          value={maxCollageImages}
-          onChange={(e) => setMaxCollageImages(Number(e.target.value))}
-        />
-      </label>
-      <label>
-        Collage frequency (0 = off)
-        <input
-          type="number"
-          min={0}
-          value={collageFrequency}
-          onChange={(e) => setCollageFrequency(Number(e.target.value))}
-        />
-      </label>
+      {displayMode === 'IMAGES' && (
+        <>
+          <label>
+            Max images per collage
+            <input
+              type="number"
+              min={2}
+              max={9}
+              value={maxCollageImages}
+              onChange={(e) => setMaxCollageImages(Number(e.target.value))}
+            />
+          </label>
+          <label>
+            Collage frequency (0 = off)
+            <input
+              type="number"
+              min={0}
+              value={collageFrequency}
+              onChange={(e) => setCollageFrequency(Number(e.target.value))}
+            />
+          </label>
+        </>
+      )}
       {error && <p className="form-error">{error}</p>}
       <div className="form-actions">
         <button type="submit" disabled={saving}>
