@@ -492,6 +492,45 @@ h3 {
   font-weight: 600;
 }
 
+.asset-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.asset-actions button {
+  padding: 6px 12px;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.asset-actions button:hover {
+  background: var(--panel);
+}
+
+.asset-actions button.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.removed-note {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.asset-actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .location-map {
   width: 380px;
   height: 280px;
@@ -532,6 +571,13 @@ h3 {
   font-size: 13px;
   pointer-events: none;
   background: var(--panel-alt);
+  /* Leaflet's own panes (tilePane, markerPane, etc.) carry explicit
+     z-index values up to 700, and none of the ancestors up to this
+     element establish their own stacking context — so without an
+     explicit z-index here (auto stacks at the "0" level), this overlay
+     rendered behind the map regardless of DOM order. Matches
+     .location-map-label's z-index for the same reason. */
+  z-index: 1000;
 }
 
 .location-map-label {

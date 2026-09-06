@@ -331,6 +331,51 @@ export async function tvRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // Dashboard's "Remove from album" button — same immichOwnerId resolution
+  // as the location lookup above, since it's acting on the TV's configured
+  // album, not whatever album the logged-in viewer happens to have picks
+  // in. Only ever targets albumIds[0] — a TV plays a single active album
+  // today (see playlist/queue.ts's regenerateQueue), so that's the only
+  // album this can mean. Doesn't trigger a queue regen: the removed asset
+  // just won't be picked next time the queue refreshes, same as any other
+  // album-picker change.
+  app.delete<{ Params: { tvId: string; assetId: string } }>(
+    '/api/v1/tvs/:tvId/assets/:assetId/album',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const config = await prisma.configuration.findFirst({
+        where: { tvId: request.params.tvId },
+        orderBy: { version: 'desc' },
+      });
+      if (!config?.immichOwnerId) return reply.code(404).send({ error: 'TV not configured' });
+      const albumId = config.albumIds[0];
+      if (!albumId) return reply.code(404).send({ error: 'TV has no album configured' });
+
+      try {
+        const immich = await getImmichClientForUser(config.immichOwnerId);
+        await immich.removeAssetFromAlbum(albumId, request.params.assetId);
+        return reply.code(204).send();
+      } catch (err) {
+        if (err instanceof ImmichNotConfiguredError) return reply.code(404).send({ error: err.message });
+        throw err;
+      }
+    },
+  );
+
+  // Dashboard's "Immich" button — hands back a full browser URL rather
+  // than exposing IMMICH_BASE_URL to the frontend directly (PROJECT.md §6:
+  // "the TV and Memories Web never see this"). Pure string construction,
+  // no DB/Immich round-trip needed.
+  app.get<{ Params: { tvId: string; assetId: string } }>(
+    '/api/v1/tvs/:tvId/assets/:assetId/immich-url',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const baseUrl = process.env.IMMICH_BASE_URL;
+      if (!baseUrl) return reply.code(500).send({ error: 'IMMICH_BASE_URL not configured' });
+      return { url: `${baseUrl.replace(/\/+$/, '')}/photos/${request.params.assetId}` };
+    },
+  );
+
   app.post<{ Body: { pairingCode: string; name: string } }>(
     '/api/v1/tvs/pairing/complete',
     { preHandler: requireAuth },

@@ -155,6 +155,13 @@ export function TvDetailPane({ tv, albums, albumsError, onConfigSaved }: Props) 
   const [renameValue, setRenameValue] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [removingFromAlbum, setRemovingFromAlbum] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  // Per-asset, not a single flag — so "Removed from album" sticks to
+  // whichever photo it was pressed for, and the button reappears as soon
+  // as a *different* photo becomes highlighted (per-asset id, survives
+  // clicking back and forth between the current/next strips).
+  const [removedAssetIds, setRemovedAssetIds] = useState<Set<string>>(new Set());
 
   const refresh = useCallback(async () => {
     try {
@@ -169,6 +176,7 @@ export function TvDetailPane({ tv, albums, albumsError, onConfigSaved }: Props) 
   useEffect(() => {
     setDetail(null);
     setSelectedAssetId(null);
+    setRemovedAssetIds(new Set());
     refresh();
     const interval = setInterval(refresh, DETAIL_POLL_MS);
     return () => clearInterval(interval);
@@ -237,6 +245,40 @@ export function TvDetailPane({ tv, albums, albumsError, onConfigSaved }: Props) 
       cancelled = true;
     };
   }, [selection?.asset.id]);
+
+  async function handleOpenInImmich(): Promise<void> {
+    if (!selection) return;
+    setActionError(null);
+    try {
+      const { url } = await api.getImmichAssetUrl(tv.id, selection.asset.id);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Could not open this photo in Immich');
+    }
+  }
+
+  async function handleRemoveFromAlbum(): Promise<void> {
+    if (!selection) return;
+    if (!window.confirm(`Remove "${selection.asset.metadata.filename}" from its Immich album? This cannot be undone.`)) {
+      return;
+    }
+    setActionError(null);
+    setRemovingFromAlbum(true);
+    try {
+      const assetId = selection.asset.id;
+      await api.removeAssetFromAlbum(tv.id, assetId);
+      // Stays pinned on this photo (rather than clearing the pin) so the
+      // "Removed from album" confirmation has something to attach to —
+      // it clears itself once a different photo is highlighted, see the
+      // render below.
+      setRemovedAssetIds((prev) => new Set(prev).add(assetId));
+      await refresh();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Could not remove this photo from its album');
+    } finally {
+      setRemovingFromAlbum(false);
+    }
+  }
 
   return (
     <div className="tv-detail-pane">
@@ -310,6 +352,19 @@ export function TvDetailPane({ tv, albums, albumsError, onConfigSaved }: Props) 
               </p>
             ))}
             {selection.fromNext && <p className="hint">Coming up next — click the current photo to return to live.</p>}
+            <div className="asset-actions">
+              <button type="button" onClick={handleOpenInImmich}>
+                Immich
+              </button>
+              {removedAssetIds.has(selection.asset.id) ? (
+                <span className="removed-note">Removed from album</span>
+              ) : (
+                <button type="button" className="danger" disabled={removingFromAlbum} onClick={handleRemoveFromAlbum}>
+                  {removingFromAlbum ? 'Removing…' : 'Remove from album'}
+                </button>
+              )}
+            </div>
+            {actionError && <p className="form-error">{actionError}</p>}
           </div>
           <LocationMap
             latitude={location?.latitude ?? null}

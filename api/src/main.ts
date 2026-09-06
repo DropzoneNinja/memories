@@ -1,5 +1,5 @@
 import "dotenv/config";
-import Fastify from "fastify";
+import Fastify, { LogController } from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { prisma } from "./db.js";
@@ -19,7 +19,10 @@ import { adminRoutes } from "./routes/admin.js";
 // pairing, config saves — see log.ts). `logger: log` reuses the same
 // pino instance as the rest of the app so everything lands in one
 // consistent stream instead of two.
-const app = Fastify({ logger: log, disableRequestLogging: true });
+const app = Fastify({
+  loggerInstance: log,
+  logController: new LogController({ disableRequestLogging: true }),
+});
 
 // Infrequent, structured memory sample (§9.15's "memory/resource
 // problems") — enough to spot slow growth across a multi-day run without
@@ -44,7 +47,12 @@ setInterval(() => {
 // CORS — locking CORS to a specific origin would just be a configuration
 // burden (dev server vs. Docker vs. whatever LAN IP a phone/laptop uses)
 // for no real security benefit here.
-await app.register(cors, { origin: true });
+// `methods` must be listed explicitly: @fastify/cors v11 narrowed its
+// default from v9's `GET,HEAD,PUT,PATCH,POST,DELETE` down to just
+// `GET,HEAD,POST`, which silently broke every DELETE/PUT/PATCH dashboard
+// action's preflight (delete/rename TV, save config, Immich key, remove
+// from album, ...) — not caught until a browser actually hit one.
+await app.register(cors, { origin: true, methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] });
 
 // Push channel for TV config-change notifications (PROJECT.md §5.10,
 // Phase 7) — realtime/hub.ts tracks subscribers, tvRoutes registers the

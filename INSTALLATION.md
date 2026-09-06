@@ -80,12 +80,12 @@ full spec.
 
 3. Provision a dashboard login — there's no self-registration form on
    purpose (PROJECT.md §12: a household system, not a multi-tenant
-   product):
+   product). Run the script inside the already-running `api` container
+   (via `docker compose exec`) rather than on the host — the container
+   already has `DATABASE_URL` and every other required env var wired up:
 
    ```sh
-   cd api
-   npm install   # only needed once, for the script's own dependencies
-   npm run create-user -- --email you@example.com --password 'a real password' --admin
+   docker compose exec api npm run create-user -- --email you@example.com --password 'a real password' --admin
    ```
 
 4. Open `http://<this-server>:5173`, sign in, and connect your Immich

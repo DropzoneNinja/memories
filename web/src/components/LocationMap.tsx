@@ -85,7 +85,7 @@ export function LocationMap({ latitude, longitude, label, loading }: Props) {
   return (
     <div className="location-map">
       <div ref={containerRef} className="location-map-canvas" />
-      {!loading && !hasLocation && <div className="location-map-empty">No location data</div>}
+      {!loading && !hasLocation && <div className="location-map-empty">No GPS data</div>}
       {label && <div className="location-map-label">{label}</div>}
     </div>
   );

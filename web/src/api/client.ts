@@ -87,6 +87,10 @@ export const api = {
   listAlbums: () => request<AlbumSummary[]>('/api/v1/albums'),
   getAssetLocation: (tvId: string, assetId: string) =>
     request<AssetLocation>(`/api/v1/tvs/${tvId}/assets/${assetId}/location`),
+  removeAssetFromAlbum: (tvId: string, assetId: string) =>
+    request<void>(`/api/v1/tvs/${tvId}/assets/${assetId}/album`, { method: 'DELETE' }),
+  getImmichAssetUrl: (tvId: string, assetId: string) =>
+    request<{ url: string }>(`/api/v1/tvs/${tvId}/assets/${assetId}/immich-url`),
 
   // Immich account settings — each user connects/disconnects
   // their own API key; both return the updated User so the caller can

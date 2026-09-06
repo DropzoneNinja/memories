@@ -122,6 +122,31 @@ test('fetchVideoStream omits the Range header when none is given', async () => {
   assert.equal((capturedHeaders as Record<string, string> | undefined)?.Range, undefined);
 });
 
+test('removeAssetFromAlbum sends the asset id and resolves on a successful result', async () => {
+  let capturedBody: string | undefined;
+  await withMockedFetch(
+    async (_url, init) => {
+      capturedBody = init?.body as string;
+      return jsonResponse([{ id: 'asset-1', success: true }]);
+    },
+    async () => {
+      const client = new ImmichClient({ baseUrl: 'http://immich.test', apiKey: 'key' });
+      await client.removeAssetFromAlbum('album-1', 'asset-1');
+    },
+  );
+  assert.deepEqual(JSON.parse(capturedBody ?? '{}'), { ids: ['asset-1'] });
+});
+
+test('removeAssetFromAlbum throws when Immich reports failure for the asset', async () => {
+  await withMockedFetch(
+    async () => jsonResponse([{ id: 'asset-1', success: false, error: 'not_found' }]),
+    async () => {
+      const client = new ImmichClient({ baseUrl: 'http://immich.test', apiKey: 'key' });
+      await assert.rejects(() => client.removeAssetFromAlbum('album-1', 'asset-1'), /not_found/);
+    },
+  );
+});
+
 test('a persistent network failure throws after exhausting all attempts', async () => {
   let calls = 0;
   await withMockedFetch(

@@ -126,6 +126,23 @@ export class ImmichClient {
     return assets;
   }
 
+  // Used by the dashboard's "Remove from album" button (per-asset, not the
+  // bulk queue/composition pipeline). Immich's `DELETE /albums/{id}/assets`
+  // returns a per-id result array rather than failing the whole request on
+  // one bad id, so a `success: false` entry has to be checked explicitly —
+  // a non-2xx response alone wouldn't catch it.
+  async removeAssetFromAlbum(albumId: string, assetId: string): Promise<void> {
+    const res = await this.request(`/albums/${albumId}/assets`, {
+      method: 'DELETE',
+      body: JSON.stringify({ ids: [assetId] }),
+    });
+    const results = (await res.json()) as { id: string; success: boolean; error?: string }[];
+    const result = results.find((r) => r.id === assetId);
+    if (result && !result.success) {
+      throw new Error(`Immich rejected album removal for ${assetId}: ${result.error ?? 'unknown error'}`);
+    }
+  }
+
   async fetchThumbnail(
     assetId: string,
     size: ImmichThumbnailSize = 'preview',
