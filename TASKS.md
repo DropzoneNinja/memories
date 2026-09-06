@@ -1202,6 +1202,25 @@ rather than checked off. Everything else is done.
       place install. Verified: the `.env` read/write logic against a real
       copy of the file (restored after), full TV test suite + type-check
       clean, `node --check` on the script.
+- [x] Fixed up to 30s of lag before Memories Web's "Now Showing" reflects
+      what's actually on the TV's screen — user-reported, glaring in
+      VIDEO mode where items can change every few seconds. Root cause:
+      `tv/src/main.ts` only ever told the server what was currently
+      displaying via the fixed 30s heartbeat interval
+      (`HEARTBEAT_INTERVAL_MS`), completely decoupled from when the
+      displayed item actually changed — barely noticeable for a 600s
+      photo interval, but a video advancing every few seconds could be
+      several items ahead of what the dashboard showed. Fixed by a new
+      `PlaybackController.setOnPresentationChanged()` callback, fired the
+      instant `showCurrent()` renders a genuinely new item (never on
+      pause()/resume(), which no longer re-render since the video
+      pause-in-place fix) — `main.ts` uses it to send an out-of-band
+      heartbeat immediately, factored into a shared `reportStatus()`
+      alongside the existing 30s interval, which stays as the guaranteed
+      fallback for config-change/reconnect detection. Verified: new
+      PlaybackController test asserting it fires on start()/next() with
+      the right presentationId and does NOT fire on pause()/resume();
+      full TV test suite + type-check clean.
 
 ---
 

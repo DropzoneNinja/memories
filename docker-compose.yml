@@ -9,8 +9,16 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      # host 5433 -> avoid clashing with any local Postgres already on 5432
-      - "5433:5432"
+      # 127.0.0.1 only — Postgres is never reached over the network by
+      # anything (api talks to it via the internal `postgres:5432` compose
+      # DNS name, not this mapping). This exists purely so host-side dev
+      # tooling on *this machine* can reach it (`prisma migrate dev`,
+      # `npm run dev` outside Docker, a native Postgres GUI client) — see
+      # INSTALLATION.md. Binding to 127.0.0.1 rather than all interfaces
+      # means it's never reachable from another machine on the network,
+      # regardless of the port number. Configurable (default 5433) only to
+      # avoid clashing with another local Postgres on this same machine.
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-memories}"]
       interval: 5s
@@ -32,10 +40,19 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PORT: 4000
     ports:
-      # Must stay reachable from the TV's IoT VLAN (10.10.40.0/24) as well as
-      # from Memories Web — confirm firewall rules allow inbound here too,
-      # not just outbound from this host (see PROJECT.md §12).
-      - "4000:4000"
+      # Unlike postgres above, this genuinely needs to be reachable from
+      # *other machines* — the TV and the dashboard's own browser
+      # JavaScript both call the API directly (no reverse proxy in this
+      # stack; the web container below never forwards API calls for
+      # them). Configurable (default 4000) only to avoid clashing with
+      # another app on this host — the container's own internal port
+      # stays 4000 regardless (set via PORT above). If you change this,
+      # also update WEB_API_BASE_URL to match, since that's what the
+      # *browser* uses to reach the API. Must stay reachable from the
+      # TV's IoT VLAN (10.10.40.0/24) as well as from Memories Web —
+      # confirm firewall rules allow inbound here too, not just outbound
+      # from this host (see PROJECT.md §12).
+      - "${API_PORT:-4000}:4000"
 
   web:
     build:
@@ -49,7 +66,12 @@ services:
     depends_on:
       - api
     ports:
-      - "5173:5173"
+      # Also genuinely needs LAN reachability, separately from api above
+      # — this is what serves the dashboard's HTML/JS to whatever browser
+      # someone opens it in. Configurable (default 5173) only to avoid
+      # clashing with another app on this host — the container's own
+      # internal port (also 5173, vite preview) never changes.
+      - "${WEB_PORT:-5173}:5173"
 
 volumes:
   postgres_data:

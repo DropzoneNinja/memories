@@ -139,10 +139,26 @@ async function main(): Promise<void> {
 
   // The heartbeat response is the guaranteed way of learning about a
   // config change (and, by succeeding at all, "we're reconnected") — see
-  // PlaybackController.applyServerStatus.
-  setInterval(async () => {
-    const status = await api.sendHeartbeat(deviceId, controller.currentStatus ?? undefined);
-    controller.applyServerStatus(status);
+  // PlaybackController.applyServerStatus. sendHeartbeat() never throws
+  // (MemoriesApiClient catches network failures and resolves null).
+  async function reportStatus(status: { presentationId: string; paused: boolean } | undefined): Promise<void> {
+    const heartbeatStatus = await api.sendHeartbeat(deviceId, status);
+    controller.applyServerStatus(heartbeatStatus);
+  }
+
+  // Reports the instant a new presentation actually starts showing, rather
+  // than waiting for the next scheduled heartbeat below — without this,
+  // Memories Web's "Now Showing" could lag up to HEARTBEAT_INTERVAL_MS
+  // (30s) behind whatever's actually on screen (user-reported; barely
+  // noticeable for a 600s photo interval, glaring for a short video). The
+  // interval heartbeat stays as the guaranteed fallback (config changes,
+  // reconnect detection) — this is purely a latency optimization on top.
+  controller.setOnPresentationChanged((status) => {
+    void reportStatus(status);
+  });
+
+  setInterval(() => {
+    void reportStatus(controller.currentStatus ?? undefined);
   }, HEARTBEAT_INTERVAL_MS);
 
   setInterval(async () => {

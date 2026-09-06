@@ -349,3 +349,34 @@ test('pause()/resume() on a video presentation freeze/resume in place rather tha
   assert.equal(renderer.resumeMediaCalls[0]?.presentationId, 'v0');
   assert.equal(renderer.renders.length, rendersBefore, 'resume() must not re-render either');
 });
+
+test('setOnPresentationChanged fires the instant a new item starts showing, not on pause/resume', async () => {
+  const renderer = makeFakeRenderer();
+  const cache = makeFakeCache();
+  const api = makeFakeApi([{ configurationVersion: 1, items: [presentation('p0'), presentation('p1')] }]);
+  const controller = new PlaybackController(api, 'device-1', {} as HTMLElement, { renderer, imageCache: cache });
+
+  const changes: { presentationId: string; paused: boolean }[] = [];
+  controller.setOnPresentationChanged((status) => changes.push(status));
+
+  await controller.start();
+  assert.deepEqual(
+    changes,
+    [{ presentationId: 'p0', paused: false }],
+    'must fire as soon as the first item is shown, not wait for a later heartbeat',
+  );
+
+  controller.next();
+  assert.deepEqual(changes, [
+    { presentationId: 'p0', paused: false },
+    { presentationId: 'p1', paused: false },
+  ]);
+
+  controller.pause();
+  controller.resume();
+  assert.equal(
+    changes.length,
+    2,
+    'pause()/resume() must not fire this — the presentation on screen did not change, only its play state',
+  );
+});

@@ -23,6 +23,26 @@ full spec.
    cp .env.example .env
    ```
 
+   - `POSTGRES_PORT` / `API_PORT` / `WEB_PORT` — host-side ports, all
+     configurable to avoid clashing with another app already using that
+     port on this host (useful if this isn't the only thing running
+     here). They are **not** equally exposed, though:
+     - `POSTGRES_PORT` (default `5433`) is bound to `127.0.0.1` only —
+       Postgres is never reached over the network by anything; `api`
+       talks to it via the compose network's internal DNS, never this
+       port. It exists purely for host-local dev tooling on *this
+       machine* (`prisma migrate dev`, `npm run dev` outside Docker — see
+       [Dev workflow](README.md#dev-workflow)), so changing this port
+       number only matters if another local Postgres is already using
+       `5433`.
+     - `API_PORT` (default `4000`) and `WEB_PORT` (default `5173`) genuinely
+       need to be reachable from *other machines* on your network — the
+       TV and the dashboard's own browser JavaScript both call the API
+       directly (no reverse proxy in this stack), and a browser needs
+       `WEB_PORT` to load the dashboard itself. **If you change
+       `API_PORT`, also update `WEB_API_BASE_URL`** below to match —
+       that's a separate value (what the *browser* uses to reach the
+       API), not derived from `API_PORT` automatically.
    - `POSTGRES_*` — any values; Compose provisions the database from these.
    - `IMMICH_BASE_URL` — your Immich server's address. This is the only
      Immich-related value that goes in `.env`: **API keys are not
@@ -49,9 +69,10 @@ full spec.
    docker compose up -d --build
    ```
 
-   This starts `postgres` (host port `5433`, to avoid clashing with any
-   local Postgres on `5432`), `api` (port `4000`), and `web` (port
-   `5173`). The API container applies any pending Prisma migrations on
+   This starts `postgres` (127.0.0.1-only host port `5433`, to avoid
+   clashing with any local Postgres on `5432`), `api` (LAN-reachable port
+   `4000`), and `web` (LAN-reachable port `5173`). The API container
+   applies any pending Prisma migrations on
    startup, before it starts serving traffic — a single `docker compose
    up` is genuinely enough for a from-scratch deployment, fresh database
    included. Re-run `docker compose build && docker compose up -d` after
@@ -203,9 +224,13 @@ Real issues hit during development, in case they recur:
   free tiles behind a key while still returning success; invisible to a
   network-status check, only visible by actually looking. The dashboard's
   location map uses plain OpenStreetMap tiles instead.
-- **Postgres port conflict** — Compose maps Postgres to host port `5433`,
-  not `5432`, specifically to avoid clashing with a local Postgres
-  install. Use `5433` for any tool connecting from the host.
+- **Port conflict with another app on this host** — Compose defaults to
+  host ports `5433` (Postgres, 127.0.0.1-only, deliberately not `5432` to
+  avoid clashing with a local Postgres install), `4000` (API,
+  LAN-reachable), and `5173` (web, LAN-reachable) — set
+  `POSTGRES_PORT`/`API_PORT`/`WEB_PORT` in `.env` to move any of them.
+  Remember to update `WEB_API_BASE_URL` too if you change `API_PORT` (see
+  [Configure and start the API + dashboard](#1-configure-and-start-the-api--dashboard)).
 - **`prisma migrate dev` can't find a database** — it reads `DATABASE_URL`
   from `api/.env`, which is separate from the root `.env` Compose uses;
   either create `api/.env` or pass `DATABASE_URL=... npx prisma migrate

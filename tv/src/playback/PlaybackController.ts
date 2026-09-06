@@ -116,6 +116,15 @@ export class PlaybackController {
   private readonly resolveUrl: (relativeUrl: string) => string;
   private readonly emptyQueueBackoff: BackoffOptions;
   private onStatusChange: ((status: string) => void) | null = null;
+  // Fired the moment a *new* presentation actually starts showing — not on
+  // pause/resume, which no longer re-render (see RendererLike's
+  // pauseMedia/resumeMedia). main.ts uses this to report the change to the
+  // server immediately (an out-of-band heartbeat) rather than waiting for
+  // the next scheduled one, since the two were previously coupled: without
+  // this, Memories Web's "Now Showing" could lag up to HEARTBEAT_INTERVAL_MS
+  // (30s) behind whatever's actually on screen — barely noticeable for a
+  // 600s photo interval, glaring for a short video (user-reported).
+  private onPresentationChanged: ((status: { presentationId: string; paused: boolean }) => void) | null = null;
 
   private cacheSize = 8;
   private disconnectedBehavior: DisconnectedBehavior = 'CONTINUE_QUEUE';
@@ -141,6 +150,10 @@ export class PlaybackController {
 
   setOnStatusChange(callback: (status: string) => void): void {
     this.onStatusChange = callback;
+  }
+
+  setOnPresentationChanged(callback: (status: { presentationId: string; paused: boolean }) => void): void {
+    this.onPresentationChanged = callback;
   }
 
   get isPaused(): boolean {
@@ -252,6 +265,7 @@ export class PlaybackController {
     // the app (§9.4) — a slow image just delays that one crossfade.
     void this.renderer.render(presentation, !this.paused);
     void this.maybeFetchMore();
+    this.onPresentationChanged?.({ presentationId: presentation.presentationId, paused: this.paused });
   }
 
   // Drops consumed items beyond the back-buffer and evicts any
