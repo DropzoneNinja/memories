@@ -17,5 +17,11 @@ ENV NODE_ENV=production
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
+# `vite preview` (unlike `vite build`) reads vite.config.ts at container
+# startup, not just build time — without this, the runtime stage had no
+# config at all, silently running with Vite's default (near-empty)
+# `preview.allowedHosts`, blocking any LAN hostname other than
+# localhost/a bare IP.
+COPY --from=build /app/vite.config.ts ./
 EXPOSE 5173
 CMD ["npm", "run", "preview"]
