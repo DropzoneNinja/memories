@@ -8,7 +8,12 @@ full spec.
 ## Prerequisites
 
 - Docker + Docker Compose (runs `api` + `web` + `postgres`)
-- Node.js 20+ and npm, for local dev outside Docker and for the TV build
+- Node.js 20+ and npm — needed on the host itself (not just inside
+  Docker) for: local dev outside Docker, running `api`'s `create-user`
+  script directly instead of via `docker compose exec` (step 3 below),
+  and the TV build. Each is a separate `npm install`, in that package's
+  own directory (`api/`, `tv/`) — there's no root `package.json` to
+  install once for everything.
 - A running [Immich](https://immich.app) instance reachable from wherever
   `api` runs — Memories is a presentation layer on top of it, not a
   replacement
@@ -88,6 +93,29 @@ full spec.
    docker compose exec api npm run create-user -- --email you@example.com --password 'a real password' --admin
    ```
 
+   Running it on the host directly instead (e.g. before `api` is up, or
+   for troubleshooting) needs two things `docker compose exec` gets for
+   free inside the container: `api`'s own dependencies, and a
+   `DATABASE_URL`:
+
+   ```sh
+   cd api
+   npm install
+   npm run create-user -- --email you@example.com --password 'a real password' --admin
+   ```
+
+   This reads `DATABASE_URL` from `api/.env` (separate from the root
+   `.env` Compose uses — see
+   [Troubleshooting](#troubleshooting)), pointed at
+   `postgresql://<user>:<password>@localhost:${POSTGRES_PORT:-5433}/<db>`
+   — that 127.0.0.1-only host port exists specifically for this kind of
+   local tooling (see step 1 above). This local `npm install` leaves
+   `api/package-lock.json` installed on the host's own checkout, separate
+   from what `docker compose build` produces inside its own build
+   container — if a later `git pull` complains about local changes to
+   `api/package-lock.json`, this is almost always why (see
+   [Troubleshooting](#troubleshooting)).
+
 4. Open `http://<this-server>:5173`, sign in, and connect your Immich
    account (below) before pairing a TV.
 
@@ -96,8 +124,10 @@ full spec.
 Each Memories Web user connects their **own** Immich API key from the
 dashboard's "Settings" panel (top bar) — generate one in Immich under
 Account Settings → API Keys (minimum permissions: `album.read`,
-`asset.read`, `asset.view`). The key is verified against Immich before
-being saved, then stored encrypted (never returned by any API response).
+`asset.read`, `asset.view`, `albumAsset.delete` — that last one only for
+the dashboard's "Remove from album" button, added in 1.1.0). The key is
+verified against Immich before being saved, then stored encrypted (never
+returned by any API response).
 
 Whoever last saves a TV's configuration determines which Immich account
 that TV's photos/videos come from (`Configuration.immichOwnerId` — see
@@ -122,11 +152,35 @@ One command builds, signs, installs, and launches the app on a real TV via
 `sdb` (auto-downloaded on first use) — no separate `npm run build` step
 needed, `deploy` does it for you.
 
+**Deploying from a headless Linux host** (a server reached only over
+SSH, no desktop session) — use `npm run deploy:headless` instead of
+`npm run deploy`, same arguments. Plain `deploy` fails there with
+`Failed to store/get password... not supported in headless Linux
+system`: Tizen's certificate signing shells out to `secret-tool`
+(libsecret) to store the cert password via the Linux Secret Service
+D-Bus API, which is normally provided by a keyring daemon started as
+part of a desktop login — headless has neither. `deploy:headless`
+(`tv/scripts/deploy-headless.sh`) wraps the same `deploy` command in a
+throwaway D-Bus session with an unlocked `gnome-keyring` for just that
+one run — verified end-to-end (cert creation, signing, `sdb`
+install/launch) against a real TV. One-time host prerequisite:
+
+```sh
+sudo apt-get install gnome-keyring libsecret-tools
+```
+
 - **`tvIp`** — the TV's LAN address. Defaults to `$MEMORIES_TV_IP`, then
   `10.10.10.80`.
-- **`serverUrl`** — which Memories API this TV should talk to (e.g.
+- **`serverUrl`** — which Memories **API** this TV should talk to (e.g.
   `https://memories.example.com` or `http://10.10.10.103:4000`), baked
-  into the build. **Pointing a TV at a different/new server deployment is
+  into the build as `VITE_MEMORIES_API_URL`. **This is `API_PORT` (default
+  `4000`), not `WEB_PORT` (`5173`)** — the same address as
+  `WEB_API_BASE_URL` in the root `.env`. The TV never talks to the web
+  dashboard at all; it only ever calls the API directly (heartbeat,
+  playlist, commands, thumbnails), the same way the dashboard's own
+  browser JavaScript does (no reverse proxy in this stack — see
+  [Configure and start the API + dashboard](#1-configure-and-start-the-api--dashboard)).
+  **Pointing a TV at a different/new server deployment is
   just this argument** — no source changes needed:
 
   ```sh
@@ -201,6 +255,10 @@ Real issues hit during development, in case they recur:
   above. A raw TCP port answering (`nc -zv <tvIp> 26101`) does not mean
   `sdb`'s own handshake will succeed — that's gated separately by the
   Developer Mode Host PC IP allowlist.
+- **`npm run deploy` fails with `Failed to store/get password... not
+  supported in headless Linux system`** — deploying from a server with no
+  desktop session (SSH-only). Use `npm run deploy:headless` instead — see
+  [TV build & deploy](#tv-build--deploy).
 - **TV makes zero network requests, not even a failed one** — Tizen's
   WAC-style access whitelist (unrelated to the `internet` privilege)
   silently blocks all outbound `fetch`/XHR unless `config.xml` declares
@@ -235,3 +293,16 @@ Real issues hit during development, in case they recur:
   from `api/.env`, which is separate from the root `.env` Compose uses;
   either create `api/.env` or pass `DATABASE_URL=... npx prisma migrate
   dev` inline.
+- **`git pull` refuses because of local changes to `api/package-lock.json`
+  (or `web/`'s, `tv/`'s)** — a host-side `npm install` run directly in
+  that package's directory (e.g. for [running `create-user`
+  locally](#1-configure-and-start-the-api--dashboard) or the TV build)
+  regenerates the lockfile against whatever's in `npm`'s registry right
+  now, which can drift slightly from what's actually committed. `docker
+  compose build` never causes this — it runs its own `npm install` inside
+  an isolated build container and never writes back to your host
+  checkout. Don't gitignore `package-lock.json` to work around this — it's
+  meant to be committed, for reproducible installs; instead either
+  discard the local drift (`git checkout -- api/package-lock.json` before
+  pulling) or stash it first if you deliberately changed a dependency
+  there (`git stash push -- api/package-lock.json`).

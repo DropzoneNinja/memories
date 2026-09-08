@@ -764,7 +764,11 @@ application**, not a casual slideshow script.
   - Base path `/api`, auth via `x-api-key` header.
   - Minimum API-key permissions, confirmed via the spec's
     `x-immich-permission` annotations on each endpoint: **`album.read`,
-    `asset.read`, `asset.view`** — nothing else needed.
+    `asset.read`, `asset.view`, `albumAsset.delete`** — nothing else
+    needed. (The first write call to Immich this app makes: 1.1.0's
+    dashboard "Remove from album" button, `DELETE /albums/{id}/assets`,
+    needs `albumAsset.delete` specifically — confirmed the same way, via
+    that endpoint's own `x-immich-permission` annotation.)
   - `GET /albums` → array of albums directly (no wrapper).
   - Album asset listing uses `POST /search/metadata` with `albumIds`
     (technically marked deprecated in the newest spec in favour of the

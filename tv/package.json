@@ -1,12 +1,13 @@
 {
   "name": "@memories/tv",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "deploy": "node scripts/deploy.cjs",
+    "deploy:headless": "bash scripts/deploy-headless.sh",
     "test": "tsx --test src/**/*.test.ts"
   },
   "devDependencies": {
