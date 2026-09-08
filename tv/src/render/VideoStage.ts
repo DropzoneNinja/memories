@@ -24,11 +24,21 @@
 // No crossfade between videos (unlike ImageStage) — a hard cut is a
 // reasonable v1 simplification for a single persistent element; revisit if
 // it looks jarring on real hardware.
+// How far before the true end (seconds) a looping video seeks back to 0.
+// Native `<video loop>` re-seeks *after* the browser treats playback as
+// having reached end-of-stream, which on embedded/TV WebKit (Tizen)
+// tears down and re-primes the decode pipeline — that's the visible
+// pause + blank frame this constant exists to avoid. Seeking back
+// slightly early means the element never hits that end-of-stream path at
+// all, at the cost of trimming this many seconds off the last loop.
+const LOOP_RESTART_LEAD_SECONDS = 0.15;
+
 export class VideoStage {
   private root: HTMLDivElement;
   private video: HTMLVideoElement;
   private endedHandler: (() => void) | null = null;
   private errorHandler: (() => void) | null = null;
+  private loopTimeUpdateHandler: (() => void) | null = null;
 
   constructor(container: HTMLElement, backgroundColor = '#0a0a0c') {
     this.root = document.createElement('div');
@@ -93,15 +103,45 @@ export class VideoStage {
   // two visually different images shown back to back. The root's flat
   // background colour shows through instead until the first frame is
   // ready, which is far less noticeable.
+  //
+  // `loop` is implemented manually (see attachLoopHandler), not via the
+  // native `loop` attribute — user-reported, post-launch: native looping
+  // showed a visible pause/blank-frame at every loop boundary (LOOP_
+  // RESTART_LEAD_SECONDS's comment explains why).
   show(videoUrl: string, loop = false): void {
-    this.video.loop = loop;
+    this.video.loop = false;
+    this.detachLoopHandler();
     this.video.src = videoUrl;
+    if (loop) this.attachLoopHandler();
     void this.video.play().catch(() => {
       // A rejected play() promise (autoplay policy, transient decode
       // error) doesn't fire the `error` event — PresentationRenderer's
       // watchdog timer is the fallback that still advances past this
       // rather than freezing on a black frame forever (§5.10/§9.4).
     });
+  }
+
+  // Seeks back to frame 0 shortly before the video actually ends, instead
+  // of letting it run to end-of-stream and rely on the native `loop`
+  // attribute to restart it — see LOOP_RESTART_LEAD_SECONDS. Guards on
+  // `duration` being finite: it's NaN/Infinity until metadata has loaded
+  // (or never becomes finite at all for a live/streamed source, which
+  // simply never triggers the early seek — no worse than native loop).
+  private attachLoopHandler(): void {
+    this.loopTimeUpdateHandler = () => {
+      const { currentTime, duration } = this.video;
+      if (Number.isFinite(duration) && currentTime >= duration - LOOP_RESTART_LEAD_SECONDS) {
+        this.video.currentTime = 0;
+      }
+    };
+    this.video.addEventListener('timeupdate', this.loopTimeUpdateHandler);
+  }
+
+  private detachLoopHandler(): void {
+    if (this.loopTimeUpdateHandler) {
+      this.video.removeEventListener('timeupdate', this.loopTimeUpdateHandler);
+      this.loopTimeUpdateHandler = null;
+    }
   }
 
   pause(): void {
@@ -118,6 +158,7 @@ export class VideoStage {
   // buffering a stream nobody's watching.
   teardown(): void {
     this.video.pause();
+    this.detachLoopHandler();
     this.video.removeAttribute('src');
     this.video.load();
   }
