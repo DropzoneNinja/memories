@@ -142,6 +142,7 @@ async function buildQueueRows(tvId: string, config: Configuration, albumId: stri
         matColour,
         tvId,
         resolveMatTexture(config.matMode),
+        config.allowZoom,
       );
       return {
         tvId,
@@ -155,6 +156,7 @@ async function buildQueueRows(tvId: string, config: Configuration, albumId: stri
         durationSeconds: presentation.duration,
         displayMode: 'IMAGES' as const,
         loop: false,
+        allowZoom: presentation.allowZoom,
       };
     }),
   );
@@ -192,6 +194,7 @@ export function buildVideoQueueRows(tvId: string, config: Configuration, albumNa
       durationSeconds: presentation.duration,
       displayMode: 'VIDEO' as const,
       loop: config.loop,
+      allowZoom: false,
     };
   });
 }
@@ -205,6 +208,7 @@ export function queueItemToPresentation(item: QueueItem) {
     duration: item.durationSeconds,
     kind: item.displayMode === 'VIDEO' ? ('video' as const) : ('image' as const),
     loop: item.loop,
+    allowZoom: item.allowZoom,
     layout: item.layout,
     background: item.background,
     frame: item.frame,

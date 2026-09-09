@@ -42,6 +42,8 @@ export interface Presentation {
   kind: 'image' | 'video';
   // Only meaningful when kind === 'video'. See PresentationRenderer.render().
   loop: boolean;
+  // Only meaningful when kind === 'image'. See PresentationRenderer.renderImage().
+  allowZoom: boolean;
   layout: { type: LayoutType; slots: PresentationSlot[] };
   background: { type: 'mat'; colour: string; texture: MatTexture | null };
   frame: { shadow: string; bevel: string };

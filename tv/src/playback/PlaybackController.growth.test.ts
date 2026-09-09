@@ -37,6 +37,7 @@ function freshPresentation(): Presentation {
     duration: 10,
     kind: 'image',
     loop: false,
+    allowZoom: false,
     layout: { type: 'single', slots: [{ assetId: id, position: 'full' }] },
     background: { type: 'mat', colour: '#111', texture: null },
     frame: { shadow: 'none', bevel: 'none' },

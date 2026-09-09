@@ -50,6 +50,7 @@ const configBodySchema = z.object({
     .optional(),
   displayMode: z.enum(['IMAGES', 'VIDEO']).optional(),
   loop: z.boolean().optional(),
+  allowZoom: z.boolean().optional(),
   disconnectedBehavior: z.enum(['CONTINUE_QUEUE', 'REPEAT_QUEUE', 'FREEZE']).optional(),
   cacheSize: z.number().int().positive().optional(),
   maxCollageImages: z.number().int().min(2).max(9).optional(),
@@ -444,6 +445,7 @@ export async function tvRoutes(app: FastifyInstance): Promise<void> {
           matMode: parsed.data.matMode ?? latest?.matMode ?? 'AUTOMATIC',
           displayMode: parsed.data.displayMode ?? latest?.displayMode ?? 'IMAGES',
           loop: parsed.data.loop ?? latest?.loop ?? false,
+          allowZoom: parsed.data.allowZoom ?? latest?.allowZoom ?? false,
           disconnectedBehavior:
             parsed.data.disconnectedBehavior ?? latest?.disconnectedBehavior ?? 'CONTINUE_QUEUE',
           cacheSize: parsed.data.cacheSize ?? latest?.cacheSize ?? 8,

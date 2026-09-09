@@ -75,6 +75,7 @@ export interface Configuration {
   // photos — `loop` only has an effect in VIDEO mode. See ConfigForm.tsx.
   displayMode: DisplayMode;
   loop: boolean;
+  allowZoom: boolean;
   disconnectedBehavior: DisconnectedBehavior;
   cacheSize: number;
   maxCollageImages: number;
@@ -114,6 +115,7 @@ export interface Presentation {
   // Presentation interface for why.
   kind: 'image' | 'video';
   loop: boolean;
+  allowZoom: boolean;
   layout: { type: LayoutType; slots: { assetId: string; position: SlotPosition }[] };
   background: { type: 'mat'; colour: string; texture: MatTexture | null };
   frame: { shadow: string; bevel: string };
@@ -171,6 +173,7 @@ export interface ConfigInput {
   matMode?: MatMode;
   displayMode?: DisplayMode;
   loop?: boolean;
+  allowZoom?: boolean;
   disconnectedBehavior?: DisconnectedBehavior;
   cacheSize?: number;
   maxCollageImages?: number;

@@ -98,7 +98,7 @@ export class PresentationRenderer {
 
     const texture = presentation.background.texture;
     this.imageStage.setMatColor(presentation.background.colour, texture ? MAT_TEXTURE_URLS[texture] : null);
-    this.imageStage.show(cachedUrls, presentation.frame, presentation.layout.type);
+    this.imageStage.show(cachedUrls, presentation.frame, presentation.layout.type, presentation.allowZoom);
 
     if (autoAdvance) {
       this.advanceTimer = window.setTimeout(() => {

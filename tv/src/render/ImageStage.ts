@@ -28,7 +28,7 @@ export type { FrameStyle };
 // of a collage grid. `alignItems: stretch` lets a row placed inside a
 // collage's column stack fill whatever height its row was allotted, the
 // same way a single full-height row already fills the whole layer.
-function buildRow(urls: string[], boxShadow: string): HTMLDivElement {
+function buildRow(urls: string[], boxShadow: string, allowZoom: boolean): HTMLDivElement {
   const row = document.createElement('div');
   row.style.display = 'flex';
   row.style.alignItems = 'stretch';
@@ -48,8 +48,10 @@ function buildRow(urls: string[], boxShadow: string): HTMLDivElement {
     // Reserves the mat margin on every side of this photo (see
     // MAT_MARGIN) — also what separates adjacent photos in a
     // multi-slot composition, so no extra inter-slot gap is needed on
-    // top of it, in either a row or a collage's stacked rows.
-    slot.style.padding = MAT_MARGIN;
+    // top of it, in either a row or a collage's stacked rows. Zoomed
+    // compositions crop-fill their slot edge-to-edge instead, so there's
+    // no margin (and no inter-slot gap) to reserve.
+    slot.style.padding = allowZoom ? '0' : MAT_MARGIN;
     slot.style.boxSizing = 'border-box';
 
     const img = document.createElement('img');
@@ -57,7 +59,12 @@ function buildRow(urls: string[], boxShadow: string): HTMLDivElement {
     img.alt = '';
     img.style.maxWidth = '100%';
     img.style.maxHeight = '100%';
-    img.style.objectFit = 'contain';
+    // object-fit: cover needs the <img> to actually have a box to crop
+    // against — maxWidth/maxHeight alone (sufficient for contain, which
+    // only ever shrinks the image) won't force it to fill the slot.
+    img.style.width = allowZoom ? '100%' : '';
+    img.style.height = allowZoom ? '100%' : '';
+    img.style.objectFit = allowZoom ? 'cover' : 'contain';
     if (boxShadow) img.style.boxShadow = boxShadow;
     slot.appendChild(img);
     row.appendChild(slot);
@@ -129,7 +136,7 @@ export class ImageStage {
   // behaves exactly as before: one image, fully centered. `frame` and
   // `layoutType` come straight from the server's Presentation — the TV
   // never decides its own composition or framing style (§5.1).
-  show(imageUrls: string[], frame: FrameStyle = NO_FRAME, layoutType?: string): void {
+  show(imageUrls: string[], frame: FrameStyle = NO_FRAME, layoutType?: string, allowZoom = false): void {
     const nextIndex = this.activeLayer === 0 ? 1 : 0;
     const nextLayer = this.layers[nextIndex];
     const prevLayer = this.layers[this.activeLayer];
@@ -151,7 +158,7 @@ export class ImageStage {
 
       let cursor = 0;
       for (const rowSize of collageRowSizes(imageUrls.length)) {
-        const rowEl = buildRow(imageUrls.slice(cursor, cursor + rowSize), boxShadow);
+        const rowEl = buildRow(imageUrls.slice(cursor, cursor + rowSize), boxShadow, allowZoom);
         rowEl.style.flex = '1 1 0';
         rowEl.style.minHeight = '0';
         stack.appendChild(rowEl);
@@ -160,7 +167,7 @@ export class ImageStage {
 
       nextLayer.appendChild(stack);
     } else {
-      nextLayer.appendChild(buildRow(imageUrls, boxShadow));
+      nextLayer.appendChild(buildRow(imageUrls, boxShadow, allowZoom));
     }
 
     // Force a layout flush so the opacity transition actually animates.

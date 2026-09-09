@@ -187,6 +187,14 @@ model Configuration {
   // through the album's videos in order, wrapping after the last one.
   displayMode          DisplayMode          @default(IMAGES)
   loop                 Boolean              @default(false)
+  // Crop-to-fill (object-fit: cover, no mat margin) instead of the default
+  // contain-fit-with-mat behaviour. Only meaningful when displayMode is
+  // IMAGES — video is already always full-bleed with no mat, so this has
+  // no effect there (see queue.ts's buildVideoQueueRows). When true, every
+  // slot in every layout type crops to fill its own area and the faux-3D
+  // frame/shadow is suppressed (there's no mat to show it against) — see
+  // presentation.ts's buildPresentation.
+  allowZoom            Boolean              @default(false)
   disconnectedBehavior DisconnectedBehavior @default(CONTINUE_QUEUE)
   cacheSize            Int                  @default(8)
   // Collage layout (§5.2 addendum): every `collageFrequency`th composition
@@ -230,6 +238,10 @@ model QueueItem {
   // per-row Presentation field (e.g. the mat colour).
   displayMode     DisplayMode @default(IMAGES)
   loop            Boolean     @default(false)
+  // Baked into the row for the same reason `loop` is (see comment above) —
+  // queueItemToPresentation() reconstructs the wire Presentation from a
+  // single row with no Configuration join.
+  allowZoom       Boolean     @default(false)
   createdAt       DateTime    @default(now())
 
   @@index([tvId, position])

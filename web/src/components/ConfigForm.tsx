@@ -48,6 +48,7 @@ export function ConfigForm({ tv, albums, albumsError, onSaved }: Props) {
   const [matMode, setMatMode] = useState<MatMode>(config?.matMode ?? 'AUTOMATIC');
   const [displayMode, setDisplayMode] = useState<DisplayMode>(config?.displayMode ?? 'IMAGES');
   const [loop, setLoop] = useState(config?.loop ?? false);
+  const [allowZoom, setAllowZoom] = useState(config?.allowZoom ?? false);
   const [disconnectedBehavior, setDisconnectedBehavior] = useState<DisconnectedBehavior>(
     config?.disconnectedBehavior ?? 'CONTINUE_QUEUE',
   );
@@ -71,6 +72,7 @@ export function ConfigForm({ tv, albums, albumsError, onSaved }: Props) {
         matMode,
         displayMode,
         loop,
+        allowZoom,
         disconnectedBehavior,
         maxCollageImages,
         collageFrequency,
@@ -150,6 +152,12 @@ export function ConfigForm({ tv, albums, albumsError, onSaved }: Props) {
               </option>
             ))}
           </select>
+        </label>
+      )}
+      {displayMode === 'IMAGES' && (
+        <label className="checkbox-label">
+          <input type="checkbox" checked={allowZoom} onChange={(e) => setAllowZoom(e.target.checked)} />
+          Allow zoom (crop photos to fill the screen instead of showing them on a mat)
         </label>
       )}
       <label>

@@ -23,6 +23,7 @@ function fakeConfig(overrides: Partial<Configuration> = {}): Configuration {
     matMode: 'AUTOMATIC',
     displayMode: 'VIDEO',
     loop: false,
+    allowZoom: false,
     disconnectedBehavior: 'CONTINUE_QUEUE',
     cacheSize: 8,
     maxCollageImages: 6,

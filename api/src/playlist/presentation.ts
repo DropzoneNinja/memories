@@ -77,6 +77,14 @@ export interface Presentation {
   // indefinitely (the TV never auto-advances); false plays it once, then
   // advances on the video's `ended` event. Always false for images.
   loop: boolean;
+  // Only meaningful for kind === 'image' (composition/group.ts never runs
+  // for video, and video is already always full-bleed with no mat — see
+  // buildVideoPresentation). true crops every slot in the composition to
+  // fill its own area (CSS object-fit: cover, no mat margin) instead of
+  // the default contain-fit-with-mat; the frame/shadow (below) is
+  // suppressed alongside it since there's no mat to show it against.
+  // Always false for video.
+  allowZoom: boolean;
   // For video, always one slot referencing the video's own asset — not
   // just a formality: Memories Web's TvDetailPane resolves its "Now
   // Showing"/"Next" preview thumbnail through these same slots (see
@@ -150,18 +158,22 @@ export function buildPresentation(
   matColourHex: string,
   tvId: string,
   matTexture: MatTexture | null,
+  allowZoom: boolean,
 ): Presentation {
   return {
     presentationId: randomUUID(),
     duration: durationSeconds,
     kind: 'image',
     loop: false,
+    allowZoom,
     layout: {
       type: group.layoutType,
       slots: group.slots.map((slot) => ({ assetId: slot.asset.id, position: slot.position })),
     },
     background: { type: 'mat', colour: matColourHex, texture: matTexture },
-    frame: { shadow: 'subtle', bevel: 'inner' },
+    // No mat to cast a shadow onto when zoomed/crop-filled — suppress the
+    // frame the same way video already does (see buildVideoPresentation).
+    frame: allowZoom ? { shadow: 'none', bevel: 'none' } : { shadow: 'subtle', bevel: 'inner' },
     transition: { type: 'crossfade', duration: CROSSFADE_SECONDS },
     assets: group.slots.map((slot) => buildPresentationAsset(slot.asset, albumName, tvId)),
   };
@@ -208,6 +220,7 @@ export function buildVideoPresentation(asset: ImmichAsset, albumName: string, tv
     duration,
     kind: 'video',
     loop,
+    allowZoom: false,
     layout: { type: 'single', slots: [{ assetId: asset.id, position: 'full' }] },
     background: { type: 'mat', colour: VIDEO_BACKGROUND_COLOUR, texture: null },
     frame: { shadow: 'none', bevel: 'none' },
