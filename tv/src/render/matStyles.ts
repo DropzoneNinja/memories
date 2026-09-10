@@ -31,7 +31,16 @@ export function boxShadowFor(frame: FrameStyle): string {
     // (RAW/matt-example-1.png/-2.png). No outer-shadow layers: nothing is
     // cast onto the mat in this direction.
     if (frame.shadow !== 'none') {
-      layers.push('inset 0 0 14px 4px rgba(0,0,0,0.4)', 'inset 0 0 0 1px rgba(0,0,0,0.25)');
+      // Three inset layers for real depth rather than one flat dark band:
+      // a crisp, strong shadow hugging the cut edge, a much broader/softer
+      // falloff reaching further into the photo (this is what actually
+      // reads as "deep" rather than "a dark line"), and a dark hairline
+      // seam right at the cut itself so the edge still looks sharp.
+      layers.push(
+        'inset 0 0 4px 3px rgba(0,0,0,0.55)',
+        'inset 0 0 40px 14px rgba(0,0,0,0.45)',
+        'inset 0 0 0 2px rgba(0,0,0,0.5)',
+      );
     }
     return layers.join(', ');
   }
