@@ -34,11 +34,12 @@ export interface CompositionGroup {
 // compatible proportions can be displayed together... Three narrower
 // portrait photographs can be displayed together"). A very narrow, tall
 // portrait divides cleanly into a three-up layout; anything wider defaults
-// to a pair. Never 1 — a lone portrait is never an acceptable composition
-// (user-requested correction: it leaves the screen looking half-empty; see
-// packPortraitRun/groupForComposition for how a genuinely unpaired
-// portrait — nothing else in its run — gets merged with a neighbouring
-// image instead of ever standing alone).
+// to a pair. Never 1 — this only ever runs on a portrait *run* of 2+ (see
+// packPortraitRun); a genuinely isolated portrait (no adjacent portrait to
+// pair with) is shown alone instead of being sized here, since a portrait
+// may only ever share a composition with another portrait — never a
+// landscape/square (user-requested correction: mixing orientations in one
+// composition looks inconsistent — see groupForComposition).
 //
 // Thresholds are calibrated against real photo ratios, not arbitrary
 // round numbers — checked against a real Immich album in Phase 4 testing,
@@ -75,15 +76,15 @@ function toCollageGroup(assets: ImmichAsset[]): CompositionGroup {
 }
 
 // Packs one run of consecutive portrait-classified assets into groups of
-// 2-3, never 1 (user-requested correction: a lone portrait must never be
-// shown by itself). Greedy: each group's size is capped by how narrow its
+// 2-3, never 1. Greedy: each group's size is capped by how narrow its
 // first image is, but never exceeds what's left in the run. Since
 // preferredGroupSize never returns less than 2, a dangling remainder can
 // only ever be exactly 1 image at the very end of the run — folded into
 // the previous group (2->3) when there's room, or reflowed (3+1 -> 2+2)
 // when the previous group is already full. Requires run.length >= 2 — a
 // run of exactly 1 portrait is handled by groupForComposition before this
-// is ever called, by pairing it with a neighbouring non-portrait image.
+// is ever called: shown alone rather than passed here, since a portrait
+// must never share a composition with a non-portrait neighbour.
 function packPortraitRun(run: ImmichAsset[]): CompositionGroup[] {
   const sizes: number[] = [];
   let i = 0;
@@ -131,45 +132,82 @@ export interface CompositionOptions {
 // implemented, so the simplest correct behaviour is to never pair them).
 //
 // Portraits are grouped in runs of up to 3, split by narrowness (see
-// preferredGroupSize) and never left alone (user-requested correction — a
-// lone portrait leaves the screen looking half-empty). A run of portraits
-// is broken by the next non-portrait image; an image with missing/unusable
-// dimensions falls back to "landscape" (see orientation.ts) rather than
-// being force-fit into a group. When a run has only one portrait — nothing
-// else nearby to pair it with — it's merged with whichever adjacent
-// non-portrait image is available instead of ever standing alone: the next
-// image is preferred (keeps chronological order forward), falling back to
-// growing the immediately preceding group by one (up to the 3-up cap) if
-// there's no next image. Only when genuinely nothing else exists to pair
-// with (e.g. a single-image album, or the preceding group is already full
-// with nothing after it) is a lone portrait unavoidable.
+// preferredGroupSize). A run of portraits is broken by the next
+// non-portrait image; an image with missing/unusable dimensions falls
+// back to "landscape" (see orientation.ts) rather than being force-fit
+// into a group. A portrait may only ever share a composition with another
+// portrait — never a landscape/square (user-requested correction: mixing
+// orientations in a 2-up looks inconsistent) — so when a run has only one
+// portrait, with no adjacent portrait to pair it with, this looks ahead
+// past the intervening non-portraits for the next portrait anywhere later
+// in the album and pulls it forward to pair with (user-requested: prefer a
+// pair over showing the isolated one alone). Images skipped over this way
+// are displayed later, in their own position, once the main scan reaches
+// them — nothing is dropped, only reordered. Only when no portrait
+// remains anywhere ahead is showing it alone unavoidable. This is a greedy
+// nearest-match, not a globally optimal pairing: it can occasionally
+// "steal" the first image of what would otherwise have been a natural
+// same-run pair further along, leaving that pair's second image isolated
+// in turn — an accepted tradeoff for keeping this simple and predictable.
 //
 // Collage (opt-in via `options.collageFrequency`): every Nth composition,
 // instead of the usual orientation-driven grouping, the next
 // min(maxCollageImages, remaining) images — any orientation, taken in
-// array order — become one 'collage' group. If fewer than 2 images remain
-// when a collage turn comes up, falls through to normal single-image
-// grouping instead of emitting a degenerate 1-photo "collage".
+// array order — become one 'collage' group, skipping over any image
+// already pulled forward into an earlier lookahead pairing (see above) so
+// it's never shown twice. If fewer than 2 images remain when a collage
+// turn comes up, falls through to normal single-image grouping instead of
+// emitting a degenerate 1-photo "collage".
 //
 // Edge cases this naturally covers: a single-image album (one group);
 // all-landscape or all-square albums (every group is size 1); all-portrait
 // albums (packed 2-3 up, no remainder ever left alone); mixed-orientation
 // albums (portrait runs interrupted by landscape/square singles, isolated
-// single portraits merged into a neighbour); panoramic/very-wide images
-// (classified landscape, shown alone); very small images (classification
-// only depends on aspect ratio, not pixel count, so these behave like any
-// other image of that shape); a tail shorter than 2 images landing on a
-// collage turn (shown normally instead).
+// single portraits paired via lookahead with the nearest later portrait,
+// or shown alone if none remains); panoramic/very-wide images (classified
+// landscape, shown alone); very small images (classification only depends
+// on aspect ratio, not pixel count, so these behave like any other image
+// of that shape); a tail shorter than 2 images landing on a collage turn
+// (shown normally instead).
 export function groupForComposition(images: ImmichAsset[], options: CompositionOptions = {}): CompositionGroup[] {
   const { maxCollageImages = 6, collageFrequency = 0 } = options;
   const groups: CompositionGroup[] = [];
+  // Indices already displayed via an earlier isolated-portrait's lookahead
+  // pairing (see below) — skipped wherever the main scan or the collage
+  // gatherer would otherwise reach them again.
+  const consumed = new Set<number>();
+
+  // Nearest not-yet-used portrait at or after `from`, or null if none
+  // remains. Always the closest match, never a farther "better" one — see
+  // the tradeoff noted in this function's doc comment above.
+  function findNextPortrait(from: number): number | null {
+    for (let j = from; j < images.length; j++) {
+      if (!consumed.has(j) && classifyOrientation(images[j]) === 'portrait') return j;
+    }
+    return null;
+  }
+
   let i = 0;
   while (i < images.length) {
+    if (consumed.has(i)) {
+      i += 1;
+      continue;
+    }
+
     if (collageFrequency > 0 && (groups.length + 1) % collageFrequency === 0) {
-      const size = Math.min(maxCollageImages, images.length - i);
-      if (size >= 2) {
-        groups.push(toCollageGroup(images.slice(i, i + size)));
-        i += size;
+      // Contiguous in intent, but any index already consumed by an
+      // earlier lookahead pairing is skipped rather than re-included —
+      // backfilling from further along so a collage still gets up to
+      // maxCollageImages actual (unique) photos.
+      const collected: ImmichAsset[] = [];
+      let j = i;
+      while (j < images.length && collected.length < maxCollageImages) {
+        if (!consumed.has(j)) collected.push(images[j]);
+        j += 1;
+      }
+      if (collected.length >= 2) {
+        groups.push(toCollageGroup(collected));
+        i = j;
         continue;
       }
     }
@@ -185,26 +223,17 @@ export function groupForComposition(images: ImmichAsset[], options: CompositionO
 
     if (end - i === 1) {
       // A genuinely isolated portrait — no neighbouring portrait to pair
-      // it with. Never shown alone: merge with the next image if one
-      // exists, else grow the immediately preceding group by one (up to
-      // the 3-up cap) if there's room.
-      const isolated = images[i];
-      if (end < images.length) {
-        groups.push(toGroup([isolated, images[end]]));
-        i = end + 1;
-        continue;
-      }
-      const previous = groups[groups.length - 1];
-      if (previous && previous.slots.length < 3) {
-        groups.pop();
-        groups.push(toGroup([...previous.slots.map((slot) => slot.asset), isolated]));
+      // it with. Rather than show it alone, look further ahead for the
+      // next available portrait (wherever it is) and pull it forward.
+      const partner = findNextPortrait(end);
+      if (partner !== null) {
+        consumed.add(partner);
+        groups.push(toGroup([images[i], images[partner]]));
         i = end;
         continue;
       }
-      // Nothing to pair with at all (e.g. a single-image album, or the
-      // preceding group is already full with nothing after it) — showing
-      // it alone is unavoidable.
-      groups.push(toGroup([isolated]));
+      // No portrait left anywhere ahead — showing it alone is unavoidable.
+      groups.push(toGroup([images[i]]));
       i = end;
       continue;
     }

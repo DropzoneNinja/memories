@@ -98,10 +98,10 @@ test('wide/near-square portraits are paired, never shown alone, even back-to-bac
 });
 
 // A single portrait sandwiched between two landscapes has no portrait
-// neighbour to pair with — merged with the next image (forward) instead of
-// ever standing alone; a trailing lone portrait at the very end of the
-// album merges backward into whatever preceded it instead.
-test('mixed-orientation album: an isolated portrait merges with a neighbouring landscape, never shown alone', () => {
+// neighbour to pair with. A portrait may only ever share a composition
+// with another portrait — never a landscape/square — so it's shown alone
+// instead of being merged with whichever non-portrait image is adjacent.
+test('mixed-orientation album: an isolated portrait is shown alone, never paired with a landscape', () => {
   const groups = groupForComposition([
     landscape('l1'),
     narrowPortrait('p1'),
@@ -109,30 +109,66 @@ test('mixed-orientation album: an isolated portrait merges with a neighbouring l
     landscape('l2'),
     narrowPortrait('p3'),
   ]);
-  assert.deepEqual(ids(groups), [['l1'], ['p1', 'p2'], ['l2', 'p3']]);
+  assert.deepEqual(ids(groups), [['l1'], ['p1', 'p2'], ['l2'], ['p3']]);
   assert.equal(groups[1].layoutType, 'two-portrait');
-  assert.equal(groups[2].layoutType, 'two-portrait');
+  assert.equal(groups[2].layoutType, 'single');
+  assert.equal(groups[3].layoutType, 'single');
 });
 
-test('an isolated portrait at the start of the album merges forward with the next landscape', () => {
+test('an isolated portrait at the start of the album is shown alone, not merged with the next landscape', () => {
   const groups = groupForComposition([narrowPortrait('p1'), landscape('l1'), landscape('l2')]);
-  assert.deepEqual(ids(groups), [['p1', 'l1'], ['l2']]);
+  assert.deepEqual(ids(groups), [['p1'], ['l1'], ['l2']]);
+  for (const g of groups) assert.equal(g.layoutType, 'single');
+});
+
+test('an isolated portrait at the end of the album is shown alone, not merged into the preceding single', () => {
+  const groups = groupForComposition([landscape('l1'), landscape('l2'), narrowPortrait('p1')]);
+  assert.deepEqual(ids(groups), [['l1'], ['l2'], ['p1']]);
+  for (const g of groups) assert.equal(g.layoutType, 'single');
+});
+
+test('an isolated portrait looks ahead past an intervening landscape to pair with a later portrait', () => {
+  const groups = groupForComposition([narrowPortrait('p1'), landscape('l1'), narrowPortrait('p2')]);
+  assert.deepEqual(ids(groups), [
+    ['p1', 'p2'],
+    ['l1'],
+  ]);
+  assert.equal(groups[0].layoutType, 'two-portrait');
+  assert.equal(groups[1].layoutType, 'single');
+});
+
+test('lookahead pairing skips past multiple intervening non-portraits, not just one', () => {
+  const groups = groupForComposition([
+    narrowPortrait('p1'),
+    landscape('l1'),
+    landscape('l2'),
+    landscape('l3'),
+    narrowPortrait('p2'),
+  ]);
+  assert.deepEqual(ids(groups), [['p1', 'p2'], ['l1'], ['l2'], ['l3']]);
   assert.equal(groups[0].layoutType, 'two-portrait');
 });
 
-test('an isolated portrait at the end of the album merges backward into the preceding single', () => {
-  const groups = groupForComposition([landscape('l1'), landscape('l2'), narrowPortrait('p1')]);
-  assert.deepEqual(ids(groups), [['l1'], ['l2', 'p1']]);
-  assert.equal(groups[1].layoutType, 'two-portrait');
-});
-
-test('two consecutive isolated portraits (separated by one landscape) both get absorbed, none left alone', () => {
-  // p1 merges forward with the landscape between them; p2 has no next
-  // image, so it grows that same group to three rather than being
-  // stranded — no group here is ever left at size 1.
-  const groups = groupForComposition([narrowPortrait('p1'), landscape('l1'), narrowPortrait('p2')]);
-  assert.deepEqual(ids(groups), [['p1', 'l1', 'p2']]);
-  assert.equal(groups[0].layoutType, 'three-portrait');
+test('a portrait pulled forward via lookahead is never duplicated in a later collage, which backfills instead', () => {
+  const groups = groupForComposition(
+    [
+      narrowPortrait('p1'),
+      landscape('l1'),
+      landscape('l2'),
+      narrowPortrait('p2'),
+      landscape('l3'),
+      landscape('l4'),
+    ],
+    { collageFrequency: 2, maxCollageImages: 3 },
+  );
+  assert.deepEqual(ids(groups), [
+    ['p1', 'p2'],
+    ['l1', 'l2', 'l3'],
+    ['l4'],
+  ]);
+  assert.equal(groups[0].layoutType, 'two-portrait');
+  assert.equal(groups[1].layoutType, 'collage');
+  assert.equal(groups[2].layoutType, 'single');
 });
 
 test('a lone portrait in a single-image album is unavoidable — nothing else exists to pair with', () => {
@@ -141,7 +177,7 @@ test('a lone portrait in a single-image album is unavoidable — nothing else ex
   assert.equal(groups[0].layoutType, 'single');
 });
 
-test('no composition in a realistic mixed album is ever a lone portrait', () => {
+test('no multi-slot composition ever mixes a portrait with a non-portrait', () => {
   const imgs = [
     landscape('l1'),
     narrowPortrait('p1'),
@@ -155,8 +191,9 @@ test('no composition in a realistic mixed album is ever a lone portrait', () => 
   ];
   const groups = groupForComposition(imgs);
   for (const g of groups) {
-    const portraitCount = g.slots.filter((s) => classifyOrientation(s.asset) === 'portrait').length;
-    assert.ok(!(portraitCount === 1 && g.slots.length === 1), `lone portrait composition: ${ids([g])}`);
+    if (g.slots.length < 2) continue;
+    const orientations = new Set(g.slots.map((s) => classifyOrientation(s.asset)));
+    assert.equal(orientations.size, 1, `mixed-orientation composition: ${ids([g])}`);
   }
 });
 
@@ -181,16 +218,20 @@ test('grouping is deterministic for the same input', () => {
   assert.deepEqual(ids(groupForComposition(imgs)), ids(groupForComposition(imgs)));
 });
 
-// Both 'a' and 'b' are isolated single-portrait runs (split by the
-// landscape-fallback 'x' between them): 'a' merges forward with 'x', and
-// 'b' — with no next image — grows that same pair to three rather than
-// being left stranded. Also confirms the unusable-dimension asset never
-// blocks portrait grouping around it.
-test('an unusable-dimension asset falls back to landscape and never leaves a portrait alone around it', () => {
+// 'x' has no usable dimensions, so it falls back to being classified
+// "landscape" — which breaks the portrait run on either side of it, so
+// 'a' and 'b' are each isolated single-portrait runs. Lookahead still
+// finds 'b' as 'a's partner past 'x', pairing them and leaving 'x' on its
+// own, rather than ever merging a portrait with 'x' itself.
+test('an unusable-dimension asset falls back to landscape and never gets merged into a portrait group', () => {
   const noDims: ImmichAsset = { id: 'x', originalFileName: 'x.jpg', type: 'IMAGE', exifInfo: null };
   const groups = groupForComposition([narrowPortrait('a'), noDims, narrowPortrait('b')]);
-  assert.deepEqual(ids(groups), [['a', 'x', 'b']]);
-  assert.equal(groups[0].layoutType, 'three-portrait');
+  assert.deepEqual(ids(groups), [
+    ['a', 'b'],
+    ['x'],
+  ]);
+  assert.equal(groups[0].layoutType, 'two-portrait');
+  assert.equal(groups[1].layoutType, 'single');
 });
 
 // Regression test: real iPhone photos are stored at 4032x3024 with EXIF
