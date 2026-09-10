@@ -10,6 +10,7 @@ export type MatMode =
   | 'LIGHT'
   | 'COMPLEMENTARY'
   | 'ANALOGOUS'
+  | 'HIGH_CONTRAST'
   | 'WHITE'
   | 'BLACK'
   | 'WOOD'
@@ -76,6 +77,7 @@ export interface Configuration {
   displayMode: DisplayMode;
   loop: boolean;
   allowZoom: boolean;
+  matRecessed: boolean;
   disconnectedBehavior: DisconnectedBehavior;
   cacheSize: number;
   maxCollageImages: number;
@@ -174,6 +176,7 @@ export interface ConfigInput {
   displayMode?: DisplayMode;
   loop?: boolean;
   allowZoom?: boolean;
+  matRecessed?: boolean;
   disconnectedBehavior?: DisconnectedBehavior;
   cacheSize?: number;
   maxCollageImages?: number;

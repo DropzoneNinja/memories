@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildVideoPresentation, parseImmichDurationSeconds, VIDEO_WATCHDOG_CEILING_SECONDS } from './presentation.js';
+import { buildPresentation, buildVideoPresentation, parseImmichDurationSeconds, VIDEO_WATCHDOG_CEILING_SECONDS } from './presentation.js';
+import type { CompositionGroup } from '../composition/group.js';
 import type { ImmichAsset } from '../immich/types.js';
 
 function videoAsset(overrides: Partial<ImmichAsset> = {}): ImmichAsset {
@@ -10,6 +11,13 @@ function videoAsset(overrides: Partial<ImmichAsset> = {}): ImmichAsset {
     type: 'VIDEO',
     exifInfo: null,
     ...overrides,
+  };
+}
+
+function singlePhotoGroup(overrides: Partial<ImmichAsset> = {}): CompositionGroup {
+  return {
+    layoutType: 'single',
+    slots: [{ asset: { id: 'photo-1', originalFileName: 'photo.jpg', type: 'IMAGE', exifInfo: null, ...overrides }, position: 'full' }],
   };
 }
 
@@ -94,4 +102,19 @@ test('metadata mapping matches the shared EXIF-derived shape (no GPS fields)', (
   assert.equal(metadata.camera, 'Apple iPhone 15');
   assert.equal(metadata.takenAt, '2026-01-01T00:00:00Z');
   assert.ok(!('latitude' in metadata), 'video metadata must never carry GPS fields, same as photos');
+});
+
+test('buildPresentation: matRecessed=true sets frame.bevel to recessed', () => {
+  const presentation = buildPresentation(singlePhotoGroup(), 'Album', 600, '#abcdef', 'tv-1', null, false, true);
+  assert.deepEqual(presentation.frame, { shadow: 'subtle', bevel: 'recessed' });
+});
+
+test('buildPresentation: matRecessed=false keeps the original raised/inner look', () => {
+  const presentation = buildPresentation(singlePhotoGroup(), 'Album', 600, '#abcdef', 'tv-1', null, false, false);
+  assert.deepEqual(presentation.frame, { shadow: 'subtle', bevel: 'inner' });
+});
+
+test('buildPresentation: allowZoom still suppresses the frame entirely, regardless of matRecessed', () => {
+  const presentation = buildPresentation(singlePhotoGroup(), 'Album', 600, '#abcdef', 'tv-1', null, true, true);
+  assert.deepEqual(presentation.frame, { shadow: 'none', bevel: 'none' });
 });

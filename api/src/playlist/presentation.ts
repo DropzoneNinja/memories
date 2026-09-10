@@ -104,12 +104,17 @@ export interface Presentation {
   // web/public/mats/), so this never depends on network reachability.
   background: { type: 'mat'; colour: string; texture: MatTexture | null };
   // Faux-3D framing (Phase 5, §5.4) — the TV renders these as a subtle
-  // shadow under each photo and a faint inner-edge highlight. Always
-  // 'subtle'/'inner' for a photo; there's no spec'd reason yet to vary
-  // those. Always 'none'/'none' for video (post-Phase-8 addition) — a
-  // mat/frame is a physical-print metaphor that doesn't apply to video,
-  // which the TV renders full-bleed with no faux-3D treatment at all.
-  frame: { shadow: 'subtle' | 'none'; bevel: 'inner' | 'none' };
+  // shadow under each photo and a faint inner-edge highlight. `bevel`
+  // picks the direction of that effect: 'inner' is the original "print
+  // raised above the mat" look (outer shadow cast onto the mat);
+  // 'recessed' (added alongside the `matRecessed` config option) instead
+  // reads as the photo sitting behind a cut-out mat window, via an inset
+  // shadow cast by the mat's edge onto the photo — see
+  // tv/src/render/matStyles.ts's boxShadowFor. Always 'none'/'none' for
+  // video (post-Phase-8 addition) and for a zoomed/crop-filled photo — a
+  // mat/frame is a physical-print metaphor that doesn't apply when
+  // there's no mat margin to show it against.
+  frame: { shadow: 'subtle' | 'none'; bevel: 'inner' | 'recessed' | 'none' };
   transition: { type: 'crossfade'; duration: number };
   assets: PresentationAsset[];
 }
@@ -159,6 +164,7 @@ export function buildPresentation(
   tvId: string,
   matTexture: MatTexture | null,
   allowZoom: boolean,
+  matRecessed: boolean,
 ): Presentation {
   return {
     presentationId: randomUUID(),
@@ -173,7 +179,9 @@ export function buildPresentation(
     background: { type: 'mat', colour: matColourHex, texture: matTexture },
     // No mat to cast a shadow onto when zoomed/crop-filled — suppress the
     // frame the same way video already does (see buildVideoPresentation).
-    frame: allowZoom ? { shadow: 'none', bevel: 'none' } : { shadow: 'subtle', bevel: 'inner' },
+    // Otherwise, `matRecessed` picks which direction the faux-3D effect
+    // runs (see the Presentation.frame comment above).
+    frame: allowZoom ? { shadow: 'none', bevel: 'none' } : { shadow: 'subtle', bevel: matRecessed ? 'recessed' : 'inner' },
     transition: { type: 'crossfade', duration: CROSSFADE_SECONDS },
     assets: group.slots.map((slot) => buildPresentationAsset(slot.asset, albumName, tvId)),
   };

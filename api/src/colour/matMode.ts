@@ -5,7 +5,7 @@
 // scoring: "Warm" should always give you a warm neutral, not whatever the
 // scorer happens to prefer for a given photo.
 import type { MatMode } from '@prisma/client';
-import type { Oklch } from './oklch.js';
+import { clamp, normalizeHue, type Oklch } from './oklch.js';
 import { generateMatCandidates, type MatCandidate, type MatCandidateKind } from './matCandidates.js';
 import { selectBestMat } from './matScoring.js';
 
@@ -17,6 +17,18 @@ import { selectBestMat } from './matScoring.js';
 // renderers — the colour stays the flat base/fallback tone, roughly
 // matched to its texture so a slow-loading image never looks jarring
 // against it.
+// HIGH_CONTRAST (below) isn't fixed — it's still derived from the photo's
+// own dominant colour — but its lightness/chroma targets are picked by eye
+// the same way these fixed neutrals are: pushed to whichever extreme
+// contrasts most with the photo, at a chroma well past every other mode's
+// range (they top out around 0.14) so it reads as genuinely vivid rather
+// than a more-saturated DARK/LIGHT.
+const HIGH_CONTRAST_DARK_L = 0.15;
+const HIGH_CONTRAST_LIGHT_L = 0.92;
+const HIGH_CONTRAST_CHROMA_BOOST = 2.2;
+const HIGH_CONTRAST_MIN_CHROMA = 0.16;
+const HIGH_CONTRAST_MAX_CHROMA = 0.28;
+
 const FIXED_WHITE: Oklch = { l: 0.98, c: 0.002, h: 90 };
 const FIXED_BLACK: Oklch = { l: 0.1, c: 0.004, h: 90 };
 const FIXED_WOOD: Oklch = { l: 0.42, c: 0.06, h: 55 };
@@ -47,6 +59,12 @@ export function resolveMatColour(matMode: MatMode, dominant: Oklch): Oklch {
       return byKind(generateMatCandidates(dominant), 'complementary').oklch;
     case 'ANALOGOUS':
       return byKind(generateMatCandidates(dominant), 'analogous').oklch;
+    case 'HIGH_CONTRAST':
+      return {
+        l: dominant.l > 0.5 ? HIGH_CONTRAST_DARK_L : HIGH_CONTRAST_LIGHT_L,
+        c: clamp(dominant.c * HIGH_CONTRAST_CHROMA_BOOST, HIGH_CONTRAST_MIN_CHROMA, HIGH_CONTRAST_MAX_CHROMA),
+        h: normalizeHue(dominant.h),
+      };
     case 'WHITE':
       return FIXED_WHITE;
     case 'BLACK':

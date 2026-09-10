@@ -20,6 +20,7 @@ const MAT_MODES: MatMode[] = [
   'LIGHT',
   'COMPLEMENTARY',
   'ANALOGOUS',
+  'HIGH_CONTRAST',
   'WHITE',
   'BLACK',
   'WOOD',
@@ -49,6 +50,7 @@ export function ConfigForm({ tv, albums, albumsError, onSaved }: Props) {
   const [displayMode, setDisplayMode] = useState<DisplayMode>(config?.displayMode ?? 'IMAGES');
   const [loop, setLoop] = useState(config?.loop ?? false);
   const [allowZoom, setAllowZoom] = useState(config?.allowZoom ?? false);
+  const [matRecessed, setMatRecessed] = useState(config?.matRecessed ?? false);
   const [disconnectedBehavior, setDisconnectedBehavior] = useState<DisconnectedBehavior>(
     config?.disconnectedBehavior ?? 'CONTINUE_QUEUE',
   );
@@ -73,6 +75,7 @@ export function ConfigForm({ tv, albums, albumsError, onSaved }: Props) {
         displayMode,
         loop,
         allowZoom,
+        matRecessed,
         disconnectedBehavior,
         maxCollageImages,
         collageFrequency,
@@ -158,6 +161,12 @@ export function ConfigForm({ tv, albums, albumsError, onSaved }: Props) {
         <label className="checkbox-label">
           <input type="checkbox" checked={allowZoom} onChange={(e) => setAllowZoom(e.target.checked)} />
           Allow zoom (crop photos to fill the screen instead of showing them on a mat)
+        </label>
+      )}
+      {displayMode === 'IMAGES' && (
+        <label className="checkbox-label">
+          <input type="checkbox" checked={matRecessed} onChange={(e) => setMatRecessed(e.target.checked)} />
+          Recessed mat (photo sits behind the mat, showing through a cut-out window, like a framed print)
         </label>
       )}
       <label>

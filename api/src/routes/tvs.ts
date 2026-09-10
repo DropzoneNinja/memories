@@ -41,6 +41,7 @@ const configBodySchema = z.object({
       'LIGHT',
       'COMPLEMENTARY',
       'ANALOGOUS',
+      'HIGH_CONTRAST',
       'WHITE',
       'BLACK',
       'WOOD',
@@ -51,6 +52,7 @@ const configBodySchema = z.object({
   displayMode: z.enum(['IMAGES', 'VIDEO']).optional(),
   loop: z.boolean().optional(),
   allowZoom: z.boolean().optional(),
+  matRecessed: z.boolean().optional(),
   disconnectedBehavior: z.enum(['CONTINUE_QUEUE', 'REPEAT_QUEUE', 'FREEZE']).optional(),
   cacheSize: z.number().int().positive().optional(),
   maxCollageImages: z.number().int().min(2).max(9).optional(),
@@ -446,6 +448,7 @@ export async function tvRoutes(app: FastifyInstance): Promise<void> {
           displayMode: parsed.data.displayMode ?? latest?.displayMode ?? 'IMAGES',
           loop: parsed.data.loop ?? latest?.loop ?? false,
           allowZoom: parsed.data.allowZoom ?? latest?.allowZoom ?? false,
+          matRecessed: parsed.data.matRecessed ?? latest?.matRecessed ?? false,
           disconnectedBehavior:
             parsed.data.disconnectedBehavior ?? latest?.disconnectedBehavior ?? 'CONTINUE_QUEUE',
           cacheSize: parsed.data.cacheSize ?? latest?.cacheSize ?? 8,

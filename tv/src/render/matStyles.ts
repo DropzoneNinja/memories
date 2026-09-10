@@ -8,7 +8,7 @@
 
 export interface FrameStyle {
   shadow: string; // 'subtle' | 'none'
-  bevel: string; // 'inner' | 'none'
+  bevel: string; // 'inner' | 'recessed' | 'none'
 }
 
 export const NO_FRAME: FrameStyle = { shadow: 'none', bevel: 'none' };
@@ -22,6 +22,20 @@ export const MAT_MARGIN = '2.5vmin';
 
 export function boxShadowFor(frame: FrameStyle): string {
   const layers: string[] = [];
+
+  if (frame.bevel === 'recessed') {
+    // Inverted from the 'inner' look below: the mat's cut edge overlaps
+    // the photo and casts its shadow inward, instead of the photo casting
+    // a shadow outward onto the mat — reads as a print sitting behind a
+    // cut-out mat window rather than raised above a flat one
+    // (RAW/matt-example-1.png/-2.png). No outer-shadow layers: nothing is
+    // cast onto the mat in this direction.
+    if (frame.shadow !== 'none') {
+      layers.push('inset 0 0 14px 4px rgba(0,0,0,0.4)', 'inset 0 0 0 1px rgba(0,0,0,0.25)');
+    }
+    return layers.join(', ');
+  }
+
   if (frame.shadow !== 'none') {
     // The photo lifted slightly off the mat, plus a broader, softer cast
     // shadow that actually darkens the mat surface around it, plus a

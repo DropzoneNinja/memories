@@ -52,8 +52,40 @@ test('resolveMatTexture returns a texture only for the three material modes', ()
   assert.equal(resolveMatTexture('WOOD'), 'wood');
   assert.equal(resolveMatTexture('CORK'), 'cork');
   assert.equal(resolveMatTexture('COTTON'), 'cotton');
-  for (const mode of ['AUTOMATIC', 'NEUTRAL', 'WARM', 'COOL', 'DARK', 'LIGHT', 'COMPLEMENTARY', 'ANALOGOUS', 'WHITE', 'BLACK'] as const) {
+  for (const mode of [
+    'AUTOMATIC',
+    'NEUTRAL',
+    'WARM',
+    'COOL',
+    'DARK',
+    'LIGHT',
+    'COMPLEMENTARY',
+    'ANALOGOUS',
+    'HIGH_CONTRAST',
+    'WHITE',
+    'BLACK',
+  ] as const) {
     assert.equal(resolveMatTexture(mode), null);
+  }
+});
+
+test('HIGH_CONTRAST keeps the photo\'s own hue but pushes lightness to whichever extreme contrasts more', () => {
+  const highA = resolveMatColour('HIGH_CONTRAST', photoA); // photoA.l = 0.4 -> light mat
+  const highB = resolveMatColour('HIGH_CONTRAST', photoB); // photoB.l = 0.7 -> dark mat
+  assert.equal(highA.h, photoA.h);
+  assert.equal(highB.h, photoB.h);
+  assert.ok(highA.l > 0.85, 'a darker photo should get a near-white high-contrast mat');
+  assert.ok(highB.l < 0.2, 'a lighter photo should get a near-black high-contrast mat');
+});
+
+test('HIGH_CONTRAST is more saturated than every other hue-preserving mode', () => {
+  const dominant = photoA;
+  const highContrastChroma = resolveMatColour('HIGH_CONTRAST', dominant).c;
+  for (const mode of ['DARK', 'LIGHT', 'COMPLEMENTARY', 'ANALOGOUS', 'WARM', 'COOL', 'NEUTRAL'] as const) {
+    assert.ok(
+      highContrastChroma > resolveMatColour(mode, dominant).c,
+      `HIGH_CONTRAST chroma should exceed ${mode}`,
+    );
   }
 });
 

@@ -143,6 +143,7 @@ async function buildQueueRows(tvId: string, config: Configuration, albumId: stri
         tvId,
         resolveMatTexture(config.matMode),
         config.allowZoom,
+        config.matRecessed,
       );
       return {
         tvId,

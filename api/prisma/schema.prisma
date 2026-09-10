@@ -30,6 +30,11 @@ enum MatMode {
   LIGHT
   COMPLEMENTARY
   ANALOGOUS
+  // Still derived from the photo's own dominant colour (same hue), unlike
+  // the fixed neutrals below — but pushed to a saturated lightness extreme
+  // instead of a muted/neutral tone. See colour/matMode.ts's HIGH_CONTRAST
+  // case for the exact formula.
+  HIGH_CONTRAST
   // Fixed neutrals (§5.3: "plus fixed neutrals — white, black, walnut/
   // wood") — unlike every mode above, these ignore the photo's dominant
   // colour entirely and always render the same swatch. WOOD/CORK/COTTON
@@ -195,6 +200,13 @@ model Configuration {
   // frame/shadow is suppressed (there's no mat to show it against) — see
   // presentation.ts's buildPresentation.
   allowZoom            Boolean              @default(false)
+  // Renders the photo as if it sits behind a cut-out mat window (a soft
+  // shadow cast by the mat's inner edge onto the photo) instead of the
+  // default look of a print raised above the mat casting its own shadow
+  // outward. Only meaningful when displayMode is IMAGES and allowZoom is
+  // false — see presentation.ts's buildPresentation, which folds this
+  // into `frame.bevel` ('inner' vs 'recessed').
+  matRecessed          Boolean              @default(false)
   disconnectedBehavior DisconnectedBehavior @default(CONTINUE_QUEUE)
   cacheSize            Int                  @default(8)
   // Collage layout (§5.2 addendum): every `collageFrequency`th composition

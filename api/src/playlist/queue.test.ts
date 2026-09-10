@@ -24,6 +24,7 @@ function fakeConfig(overrides: Partial<Configuration> = {}): Configuration {
     displayMode: 'VIDEO',
     loop: false,
     allowZoom: false,
+    matRecessed: false,
     disconnectedBehavior: 'CONTINUE_QUEUE',
     cacheSize: 8,
     maxCollageImages: 6,
