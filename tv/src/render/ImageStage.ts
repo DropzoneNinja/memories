@@ -28,7 +28,7 @@ export type { FrameStyle };
 // of a collage grid. `alignItems: stretch` lets a row placed inside a
 // collage's column stack fill whatever height its row was allotted, the
 // same way a single full-height row already fills the whole layer.
-function buildRow(urls: string[], boxShadow: string, allowZoom: boolean): HTMLDivElement {
+function buildRow(urls: string[], frame: FrameStyle, allowZoom: boolean): HTMLDivElement {
   const row = document.createElement('div');
   row.style.display = 'flex';
   row.style.alignItems = 'stretch';
@@ -36,6 +36,8 @@ function buildRow(urls: string[], boxShadow: string, allowZoom: boolean): HTMLDi
   row.style.width = '100%';
   row.style.height = '100%';
   row.style.minHeight = '0';
+
+  const boxShadow = boxShadowFor(frame);
 
   for (const url of urls) {
     const slot = document.createElement('div');
@@ -65,8 +67,35 @@ function buildRow(urls: string[], boxShadow: string, allowZoom: boolean): HTMLDi
     img.style.width = allowZoom ? '100%' : '';
     img.style.height = allowZoom ? '100%' : '';
     img.style.objectFit = allowZoom ? 'cover' : 'contain';
-    if (boxShadow) img.style.boxShadow = boxShadow;
     slot.appendChild(img);
+
+    if (boxShadow) {
+      if (frame.bevel === 'recessed') {
+        // Can't put an inset box-shadow on the <img> itself here: a
+        // replaced element's own decoded bitmap paints on top of that
+        // same element's background/box-shadow, so it would hide almost
+        // all of it (confirmed against a real photo of the TV screen —
+        // only a sub-pixel sliver showed through at one edge). Instead,
+        // append a transparent overlay sibling *after* the img (later
+        // siblings paint on top) positioned to the slot's content box —
+        // position:absolute + inset:0 resolves against the nearest
+        // positioned ancestor's padding edge, which for `slot` (padded by
+        // MAT_MARGIN above) is exactly the mat's cut-out window. The
+        // inset shadow layers then render over the photo as intended, and
+        // the outer bevel-reveal ring lands in the unoccupied margin
+        // around it.
+        slot.style.position = 'relative';
+        const shadowOverlay = document.createElement('div');
+        shadowOverlay.style.position = 'absolute';
+        shadowOverlay.style.inset = '0';
+        shadowOverlay.style.pointerEvents = 'none';
+        shadowOverlay.style.boxShadow = boxShadow;
+        slot.appendChild(shadowOverlay);
+      } else {
+        img.style.boxShadow = boxShadow;
+      }
+    }
+
     row.appendChild(slot);
   }
 
@@ -143,8 +172,6 @@ export class ImageStage {
 
     nextLayer.innerHTML = '';
 
-    const boxShadow = boxShadowFor(frame);
-
     if (layoutType === 'collage' && imageUrls.length > 1) {
       // Near-square stack of rows, each filling its full share of height —
       // every cell is exactly filled edge to edge (mat padding only, via
@@ -158,7 +185,7 @@ export class ImageStage {
 
       let cursor = 0;
       for (const rowSize of collageRowSizes(imageUrls.length)) {
-        const rowEl = buildRow(imageUrls.slice(cursor, cursor + rowSize), boxShadow, allowZoom);
+        const rowEl = buildRow(imageUrls.slice(cursor, cursor + rowSize), frame, allowZoom);
         rowEl.style.flex = '1 1 0';
         rowEl.style.minHeight = '0';
         stack.appendChild(rowEl);
@@ -167,7 +194,7 @@ export class ImageStage {
 
       nextLayer.appendChild(stack);
     } else {
-      nextLayer.appendChild(buildRow(imageUrls, boxShadow, allowZoom));
+      nextLayer.appendChild(buildRow(imageUrls, frame, allowZoom));
     }
 
     // Force a layout flush so the opacity transition actually animates.

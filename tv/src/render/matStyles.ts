@@ -28,18 +28,33 @@ export function boxShadowFor(frame: FrameStyle): string {
     // the photo and casts its shadow inward, instead of the photo casting
     // a shadow outward onto the mat — reads as a print sitting behind a
     // cut-out mat window rather than raised above a flat one
-    // (RAW/matt-example-1.png/-2.png). No outer-shadow layers: nothing is
-    // cast onto the mat in this direction.
+    // (RAW/matt-example-1.png/-2.png).
+    //
+    // IMPORTANT: this string is applied to a dedicated overlay element
+    // positioned over the photo (ImageStage.ts's buildRow), never to the
+    // <img> itself. An inset box-shadow on an <img> paints underneath the
+    // image's own decoded bitmap (a replaced element's content always
+    // paints after that same element's background/box-shadow), so it
+    // ends up almost entirely hidden behind the photo — confirmed against
+    // a real photo of the actual TV screen, only a sub-pixel sliver was
+    // visible at one edge. The overlay is a separate, later-painted
+    // sibling with no bitmap content of its own, so both the inset (dark,
+    // "inside the window") and outer (bright, "in the mat margin") layers
+    // below actually render where intended.
     if (frame.shadow !== 'none') {
-      // Three inset layers for real depth rather than one flat dark band:
-      // a crisp, strong shadow hugging the cut edge, a much broader/softer
-      // falloff reaching further into the photo (this is what actually
-      // reads as "deep" rather than "a dark line"), and a dark hairline
-      // seam right at the cut itself so the edge still looks sharp.
       layers.push(
-        'inset 0 0 4px 3px rgba(0,0,0,0.55)',
-        'inset 0 0 40px 14px rgba(0,0,0,0.45)',
-        'inset 0 0 0 2px rgba(0,0,0,0.5)',
+        // Bright bevel-reveal ring just outside the window opening, in
+        // the mat margin — real bevel-cut matboard shows its (usually
+        // white/cream) paper core at the cut, catching light, regardless
+        // of the mat's own surface colour.
+        '0 0 0 2px rgba(255,255,255,0.6)',
+        // Crisp dark line right at the cut edge...
+        'inset 0 0 0 2px rgba(0,0,0,0.65)',
+        // ...a stronger shadow hugging just inside it...
+        'inset 0 0 10px 6px rgba(0,0,0,0.55)',
+        // ...and a broad, soft falloff reaching well into the photo, for
+        // real depth rather than a thin dark line.
+        'inset 0 0 32px 14px rgba(0,0,0,0.3)',
       );
     }
     return layers.join(', ');
