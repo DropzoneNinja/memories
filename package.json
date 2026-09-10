@@ -1,6 +1,6 @@
 {
   "name": "memories",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "Self-hosted Frame TV photo system — release version source of truth for api/web/tv",
   "scripts": {
