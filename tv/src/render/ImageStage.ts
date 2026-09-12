@@ -77,17 +77,21 @@ function buildRow(urls: string[], frame: FrameStyle, allowZoom: boolean): HTMLDi
         // all of it (confirmed against a real photo of the TV screen —
         // only a sub-pixel sliver showed through at one edge). Instead,
         // append a transparent overlay sibling *after* the img (later
-        // siblings paint on top) positioned to the slot's content box —
-        // position:absolute + inset:0 resolves against the nearest
-        // positioned ancestor's padding edge, which for `slot` (padded by
-        // MAT_MARGIN above) is exactly the mat's cut-out window. The
-        // inset shadow layers then render over the photo as intended, and
-        // the outer bevel-reveal ring lands in the unoccupied margin
-        // around it.
+        // siblings paint on top) positioned to the slot's content box.
+        //
+        // The containing block for an absolutely-positioned element is
+        // its nearest positioned ancestor's *padding* box — i.e. `slot`'s
+        // own MAT_MARGIN padding is INCLUDED in that box, not excluded
+        // from it. `inset: 0` therefore covers the whole slot, margin and
+        // all — confirmed on a real photo, the shadow rings ended up
+        // hugging the slot's outer edge, nowhere near the actual photo.
+        // Insetting by MAT_MARGIN ourselves (the same value `slot` pads
+        // by) is what actually lands the overlay on the mat's cut-out
+        // window, flush with the photo's own edges.
         slot.style.position = 'relative';
         const shadowOverlay = document.createElement('div');
         shadowOverlay.style.position = 'absolute';
-        shadowOverlay.style.inset = '0';
+        shadowOverlay.style.inset = MAT_MARGIN;
         shadowOverlay.style.pointerEvents = 'none';
         shadowOverlay.style.boxShadow = boxShadow;
         slot.appendChild(shadowOverlay);
