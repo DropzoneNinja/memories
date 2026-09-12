@@ -77,24 +77,39 @@ function buildRow(urls: string[], frame: FrameStyle, allowZoom: boolean): HTMLDi
         // all of it (confirmed against a real photo of the TV screen —
         // only a sub-pixel sliver showed through at one edge). Instead,
         // append a transparent overlay sibling *after* the img (later
-        // siblings paint on top) positioned to the slot's content box.
+        // siblings paint on top) sized/positioned to match the img's own
+        // rendered box exactly.
         //
-        // The containing block for an absolutely-positioned element is
-        // its nearest positioned ancestor's *padding* box — i.e. `slot`'s
-        // own MAT_MARGIN padding is INCLUDED in that box, not excluded
-        // from it. `inset: 0` therefore covers the whole slot, margin and
-        // all — confirmed on a real photo, the shadow rings ended up
-        // hugging the slot's outer edge, nowhere near the actual photo.
-        // Insetting by MAT_MARGIN ourselves (the same value `slot` pads
-        // by) is what actually lands the overlay on the mat's cut-out
-        // window, flush with the photo's own edges.
+        // That box is NOT simply "the slot's content area minus
+        // MAT_MARGIN": a photo whose aspect ratio doesn't match its slot
+        // still contain-fits *within* that area, leaving extra letterbox
+        // space the img doesn't actually occupy (confirmed on a real
+        // photo — an overlay sized to the slot's opening landed near the
+        // screen/slot edge, not around the photo itself, whenever the two
+        // aspect ratios differed). Since width/height are both left
+        // `auto` here (only max-width/max-height constrain them), the
+        // img's own box already shrinks to exactly its visible pixels —
+        // no separate contain-fit math to duplicate, just mirror the
+        // browser's own layout via offsetLeft/Top/Width/Height once the
+        // image has actually loaded (they're unreliable before that).
         slot.style.position = 'relative';
         const shadowOverlay = document.createElement('div');
         shadowOverlay.style.position = 'absolute';
-        shadowOverlay.style.inset = MAT_MARGIN;
         shadowOverlay.style.pointerEvents = 'none';
         shadowOverlay.style.boxShadow = boxShadow;
         slot.appendChild(shadowOverlay);
+
+        const fitOverlayToImage = (): void => {
+          shadowOverlay.style.left = `${img.offsetLeft}px`;
+          shadowOverlay.style.top = `${img.offsetTop}px`;
+          shadowOverlay.style.width = `${img.offsetWidth}px`;
+          shadowOverlay.style.height = `${img.offsetHeight}px`;
+        };
+        if (img.complete && img.naturalWidth > 0) {
+          fitOverlayToImage();
+        } else {
+          img.addEventListener('load', fitOverlayToImage, { once: true });
+        }
       } else {
         img.style.boxShadow = boxShadow;
       }
